@@ -356,7 +356,7 @@ func (md MethodDexFundTriggerPeriodJob) DoReceive(db vm_db.VmDb, block *ledger.A
 		switch param.BizType {
 		case dex.MineVxForFeeJob:
 			rateSumForFee := dex.RateSumForFeeMineNew
-			if !dex.IsEarthFork(db) {
+			if !dex.IsNormalMiningStarted(db) {
 				rateSumForFee = dex.RateSumForFeeMine
 			}
 			if amtForItems, vxPoolLeaved, success = dex.GetVxAmountsForEqualItems(db, param.PeriodId, vxPool, rateSumForFee, dex.ViteTokenType, dex.UsdTokenType); success {
@@ -368,7 +368,7 @@ func (md MethodDexFundTriggerPeriodJob) DoReceive(db vm_db.VmDb, block *ledger.A
 			}
 		case dex.MineVxForStakingJob:
 			rateSumForStaking := dex.RateForStakingMineNew
-			if !dex.IsEarthFork(db) {
+			if !dex.IsNormalMiningStarted(db) {
 				rateSumForStaking = dex.RateForStakingMine
 			}
 			if amount, vxPoolLeaved, success = dex.GetVxAmountToMine(db, param.PeriodId, vxPool, rateSumForStaking); success {
@@ -379,7 +379,7 @@ func (md MethodDexFundTriggerPeriodJob) DoReceive(db vm_db.VmDb, block *ledger.A
 				return handleDexReceiveErr(fundLogger, md.MethodName, fmt.Errorf("no vx available on mine for staking"), sendBlock)
 			}
 		case dex.MineVxForMakerAndMaintainerJob:
-			if dex.IsEarthFork(db) {
+			if dex.IsNormalMiningStarted(db) {
 				if amount, vxPoolLeaved, success = dex.GetVxAmountToMine(db, param.PeriodId, vxPool, dex.RateSumForMakerMineNew); success {
 					dex.DoMineVxForMaker(db, param.PeriodId, amount)
 				} else {
@@ -573,13 +573,13 @@ func (md *MethodDexFundStakeForPrincipalSVIP) GetReceiveQuota(gasTable *util.Quo
 
 func (md *MethodDexFundStakeForPrincipalSVIP) DoSend(db vm_db.VmDb, block *ledger.AccountBlock) error {
 	var (
-		err   error
+		err       error
 		principal = new(types.Address)
 	)
 	if err = cabi.ABIDexFund.UnpackMethod(principal, md.MethodName, block.Data); err != nil {
 		return err
 	}
-	if principal == nil || *principal == types.ZERO_ADDRESS {
+	if principal == nil || *principal == types.ZERO_ADDRESS || *principal == block.AccountAddress {
 		return dex.InvalidInputParamErr
 	}
 	return nil
@@ -588,9 +588,6 @@ func (md *MethodDexFundStakeForPrincipalSVIP) DoSend(db vm_db.VmDb, block *ledge
 func (md MethodDexFundStakeForPrincipalSVIP) DoReceive(db vm_db.VmDb, block *ledger.AccountBlock, sendBlock *ledger.AccountBlock, vm vmEnvironment) ([]*ledger.AccountBlock, error) {
 	var principal = new(types.Address)
 	cabi.ABIDexFund.UnpackMethod(principal, md.MethodName, sendBlock.Data)
-	if sendBlock.AccountAddress == *principal {
-		return handleDexReceiveErr(fundLogger, md.MethodName, dex.InvalidInputParamErr, sendBlock)
-	}
 	if appendBlocks, err := dex.HandleStakeAction(db, dex.StakeForPrincipalSuperVIP, dex.Stake, sendBlock.AccountAddress, *principal, dex.StakeForSuperVIPAmount, nodeConfig.params.DexSuperVipStakeHeight, block); err != nil {
 		return handleDexReceiveErr(fundLogger, md.MethodName, err, sendBlock)
 	} else {
@@ -898,12 +895,7 @@ func (md MethodDexFundDelegateStakeCallbackV2) DoReceive(db vm_db.VmDb, block *l
 				return handleDexReceiveErr(fundLogger, md.MethodName, dex.InvalidAmountForStakeCallbackErr, sendBlock)
 			}
 		}
-		if info.StakeType == dex.StakeForPrincipalSuperVIP {
-			stakeAddress, _ := types.BytesToAddress(info.Address)
-			dex.DepositAccount(db, stakeAddress, ledger.ViteTokenId, sendBlock.Amount)
-		} else {
-			dex.DepositAccount(db, address, ledger.ViteTokenId, sendBlock.Amount)
-		}
+		dex.DepositAccount(db, address, ledger.ViteTokenId, sendBlock.Amount)
 		dex.DeleteDelegateStakeInfo(db, param.Id.Bytes())
 	}
 	return
@@ -1185,7 +1177,7 @@ func (md MethodDexFundTradeAdminConfig) DoReceive(db vm_db.VmDb, block *ledger.A
 			}
 		}
 		if dex.IsOperationValidWithMask(param.OperationCode, dex.TradeAdminConfigNewQuoteToken) {
-			if !dex.IsEarthFork(db) && param.QuoteTokenType < dex.ViteTokenType || param.QuoteTokenType > dex.UsdTokenType {
+			if param.QuoteTokenType < dex.ViteTokenType || param.QuoteTokenType > dex.UsdTokenType {
 				return handleDexReceiveErr(fundLogger, md.MethodName, dex.InvalidQuoteTokenTypeErr, sendBlock)
 			} else {
 				if _, ok := dex.QuoteTokenTypeInfos[int32(param.QuoteTokenType)]; !ok {
@@ -1220,15 +1212,15 @@ func (md MethodDexFundTradeAdminConfig) DoReceive(db vm_db.VmDb, block *ledger.A
 		if dex.IsOperationValidWithMask(param.OperationCode, dex.TradeAdminConfigMineThreshold) {
 			dex.SaveMineThreshold(db, param.TokenTypeForMiningThreshold, param.MinMiningThreshold)
 		}
+		if dex.IsEarthFork(db) && dex.IsOperationValidWithMask(param.OperationCode, dex.TradeAdminStartNormalMine) && !dex.IsNormalMiningStarted(db) {
+			dex.StartNormalMine(db)
+		}
 		if dex.IsEarthFork(db) && dex.IsOperationValidWithMask(param.OperationCode, dex.TradeAdminBurnExtraVx) && dex.GetVxBurnAmount(db).Sign() == 0 {
 			if blocks, err = dex.BurnExtraVx(db); err != nil {
 				return handleDexReceiveErr(fundLogger, md.MethodName, err, sendBlock)
 			} else {
 				return
 			}
-		}
-		if dex.IsEarthFork(db) && dex.IsOperationValidWithMask(param.OperationCode, dex.TradeAdminConfigNewQuoteTokenType) {
-			dex.SaveNewQuoteTokenTypeInfo(db, param.TokenTypeForTradeThreshold, param.MinTradeThreshold, param.MinMiningThreshold)
 		}
 	} else {
 		return handleDexReceiveErr(fundLogger, md.MethodName, dex.OnlyOwnerAllowErr, sendBlock)
@@ -1753,9 +1745,9 @@ func (md *MethodDexFundLockVxForDividend) DoSend(db vm_db.VmDb, block *ledger.Ac
 
 func (md MethodDexFundLockVxForDividend) DoReceive(db vm_db.VmDb, block *ledger.AccountBlock, sendBlock *ledger.AccountBlock, vm vmEnvironment) ([]*ledger.AccountBlock, error) {
 	var (
-		param = new(dex.ParamLockVxForDividend)
+		param            = new(dex.ParamLockVxForDividend)
 		updatedVxAccount *dexproto.Account
-		err   error
+		err              error
 	)
 	if err = cabi.ABIDexFund.UnpackMethod(param, md.MethodName, sendBlock.Data); err != nil {
 		return handleDexReceiveErr(fundLogger, md.MethodName, err, sendBlock)

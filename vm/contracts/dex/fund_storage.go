@@ -52,6 +52,7 @@ var (
 	vxLockedSumFundsKey      = []byte("vxlFS:") // vxLockedFundSum
 
 	lastJobPeriodIdWithBizTypeKey = []byte("ljpBId:")
+	normalMineStartedKey          = []byte("nmst:")
 	firstMinedVxPeriodIdKey       = []byte("fMVPId:")
 	marketInfoKeyPrefix           = []byte("mk:") // market: tradeToke,quoteToken
 
@@ -168,12 +169,12 @@ const (
 
 //MethodNameDexFundTradeAdminConfig
 const (
-	TradeAdminConfigMineMarket        = 1
-	TradeAdminConfigNewQuoteToken     = 2
-	TradeAdminConfigTradeThreshold    = 4
-	TradeAdminConfigMineThreshold     = 8
-	TradeAdminBurnExtraVx             = 16
-	TradeAdminConfigNewQuoteTokenType = 32
+	TradeAdminConfigMineMarket     = 1
+	TradeAdminConfigNewQuoteToken  = 2
+	TradeAdminConfigTradeThreshold = 4
+	TradeAdminConfigMineThreshold  = 8
+	TradeAdminStartNormalMine      = 16
+	TradeAdminBurnExtraVx          = 32
 )
 
 const (
@@ -1584,11 +1585,6 @@ func GetMineThresholdKey(quoteTokenType uint8) []byte {
 	return append(mineThresholdKeyPrefix, quoteTokenType)
 }
 
-func SaveNewQuoteTokenTypeInfo(db vm_db.VmDb, quoteTokenType uint8, tradeThreshold, mineThreshold *big.Int) {
-	SaveTradeThreshold(db, quoteTokenType, tradeThreshold)
-	SaveMineThreshold(db, quoteTokenType, mineThreshold)
-}
-
 func GetMakerMiningAdmin(db vm_db.VmDb) *types.Address {
 	if mmaBytes := getValueFromDb(db, makerMiningAdminKey); len(mmaBytes) == types.AddressSize {
 		if makerMiningAdmin, err := types.BytesToAddress(mmaBytes); err == nil {
@@ -2031,6 +2027,14 @@ func NewInviteCode(db vm_db.VmDb, hash types.Hash) uint32 {
 		}
 	}
 	return 0
+}
+
+func StartNormalMine(db vm_db.VmDb) {
+	setValueToDb(db, normalMineStartedKey, []byte{1})
+}
+
+func IsNormalMiningStarted(db vm_db.VmDb) bool {
+	return len(getValueFromDb(db, normalMineStartedKey)) > 0
 }
 
 func GetVxMinePool(db vm_db.VmDb) *big.Int {
