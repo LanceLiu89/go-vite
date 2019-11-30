@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/vitelabs/go-vite/chain"
 	"github.com/vitelabs/go-vite/common/types"
+	"github.com/vitelabs/go-vite/ledger"
 	"github.com/vitelabs/go-vite/log15"
 	apidex "github.com/vitelabs/go-vite/rpcapi/api/dex"
 	"github.com/vitelabs/go-vite/vite"
@@ -67,6 +68,11 @@ func (f DexFundApi) GetAccountFundInfo(addr types.Address, tokenId *types.TokenT
 				info.VxUnlocking = v.VxUnlocking.String()
 			}
 		}
+
+		if v.Token == ledger.ViteTokenId && v.CancellingStake != nil {
+			info.CancellingStake = v.CancellingStake.String()
+		}
+
 		balanceInfo[v.Token] = info
 	}
 	return balanceInfo, nil
@@ -193,7 +199,6 @@ func (f DexFundApi) GetCurrentVxMineInfo() (mineInfo *apidex.RpcVxMineInfo, err 
 	if toMine.Cmp(available) > 0 {
 		toMine = available
 	}
-	var isNormalMiningStarted = dex.IsNormalMiningStarted(db)
 	mineInfo = new(apidex.RpcVxMineInfo)
 	if toMine.Sign() == 0 {
 		err = fmt.Errorf("no vx available on mine")
@@ -205,14 +210,10 @@ func (f DexFundApi) GetCurrentVxMineInfo() (mineInfo *apidex.RpcVxMineInfo, err 
 	mineInfo.Total = toMine.String()
 	var (
 		amountForItems map[int32]*big.Int
-		amount *big.Int
-		success bool
+		amount         *big.Int
+		success        bool
 	)
-	var rateSumForFee = dex.RateSumForFeeMineNew
-	if !isNormalMiningStarted {
-		rateSumForFee = dex.RateSumForFeeMine
-	}
-	if amountForItems, available, success = dex.GetVxAmountsForEqualItems(db, periodId, available, rateSumForFee, dex.ViteTokenType, dex.UsdTokenType); success {
+	if amountForItems, available, success = dex.GetVxAmountsForEqualItems(db, periodId, available, dex.RateSumForFeeMine, dex.ViteTokenType, dex.UsdTokenType); success {
 		mineInfo.FeeMineDetail = make(map[int32]string)
 		feeMineSum := new(big.Int)
 		for tokenType, amount := range amountForItems {
@@ -223,23 +224,13 @@ func (f DexFundApi) GetCurrentVxMineInfo() (mineInfo *apidex.RpcVxMineInfo, err 
 	} else {
 		return
 	}
-	var rateForStaking = dex.RateForStakingMineNew
-	if !isNormalMiningStarted {
-		rateForStaking = dex.RateForStakingMine
-	}
-	if amount, available, success = dex.GetVxAmountToMine(db, periodId, available, rateForStaking); success {
+	if amount, available, success = dex.GetVxAmountToMine(db, periodId, available, dex.RateForStakingMine); success {
 		mineInfo.PledgeMine = amount.String()
 	} else {
 		return
 	}
-	if isNormalMiningStarted {
-		if amount, available, success = dex.GetVxAmountToMine(db, periodId, available, dex.RateSumForMakerMineNew); success {
-			mineInfo.MakerMine = amount.String()
-		}
-	} else {
-		if amountForItems, available, success = dex.GetVxAmountsForEqualItems(db, periodId, available, dex.RateSumForMakerAndMaintainerMine, dex.MineForMaker, dex.MineForMaintainer); success {
-			mineInfo.MakerMine = amountForItems[dex.MineForMaker].String()
-		}
+	if amountForItems, available, success = dex.GetVxAmountsForEqualItems(db, periodId, available, dex.RateSumForMakerAndMaintainerMine, dex.MineForMaker, dex.MineForMaintainer); success {
+		mineInfo.MakerMine = amountForItems[dex.MineForMaker].String()
 	}
 	return
 }
@@ -265,7 +256,7 @@ func (f DexFundApi) GetCurrentPledgeForVxSum() (string, error) {
 	if err != nil {
 		return "0", err
 	}
-	if miningStakings, ok := dex.GetDexMiningStakings(db); !ok {
+	if miningStakings, ok := dex.GetDexMiningStakings(db, dex.IsEarthFork(db)); !ok {
 		return "0", nil
 	} else {
 		pledgesLen := len(miningStakings.Stakings)
