@@ -106,7 +106,7 @@ func GetQuotaForBlock(db quotaDb, addr types.Address, stakeAmount *big.Int, diff
 	return quotaTotal, quotaAddition, nil
 }
 
-// Check whether current quota of a contract account is enough to receive a new block
+// CheckQuota check whether current quota of a contract account is enough to receive a new block
 func CheckQuota(db quotaDb, q types.Quota, addr types.Address) (bool, uint64) {
 	if q.Blocked() {
 		return false, q.BlockReleaseHeight()
