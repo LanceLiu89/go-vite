@@ -58,6 +58,7 @@ var (
 	dexAgentContracts = newDexAgentContracts()
 	leafContracts     = newLeafContracts()
 	earthContracts    = newEarthContracts()
+	deFiContracts     = newDeFiContracts()
 )
 
 func newSimpleContracts() map[types.Address]*builtinContract {
@@ -100,7 +101,7 @@ func newDexContracts() map[types.Address]*builtinContract {
 	contracts[types.AddressDexFund] = &builtinContract{
 		map[string]BuiltinContractMethod{
 			cabi.MethodNameDexFundUserDeposit:          &MethodDexFundDeposit{cabi.MethodNameDexFundUserDeposit},
-			cabi.MethodNameDexFundUserWithdraw:         &MethodDexFundWithdraw{cabi.MethodNameDexFundUserWithdraw},
+			cabi.MethodNameDexFundUserWithdraw:         &MethodDeFiWithdraw{cabi.MethodNameDexFundUserWithdraw},
 			cabi.MethodNameDexFundNewMarket:            &MethodDexFundOpenNewMarket{cabi.MethodNameDexFundNewMarket},
 			cabi.MethodNameDexFundNewOrder:             &MethodDexFundPlaceOrder{cabi.MethodNameDexFundNewOrder},
 			cabi.MethodNameDexFundSettleOrders:         &MethodDexFundSettleOrders{cabi.MethodNameDexFundSettleOrders},
@@ -161,7 +162,7 @@ func newLeafContracts() map[types.Address]*builtinContract {
 	contracts[types.AddressAsset].m[cabi.MethodNameTransferOwnershipV2] = &MethodTransferOwnership{cabi.MethodNameTransferOwnershipV2}
 
 	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundDeposit] = &MethodDexFundDeposit{cabi.MethodNameDexFundDeposit}
-	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundWithdraw] = &MethodDexFundWithdraw{cabi.MethodNameDexFundWithdraw}
+	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundWithdraw] = &MethodDeFiWithdraw{cabi.MethodNameDexFundWithdraw}
 	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundOpenNewMarket] = &MethodDexFundOpenNewMarket{cabi.MethodNameDexFundOpenNewMarket}
 	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundPlaceOrder] = &MethodDexFundPlaceOrder{cabi.MethodNameDexFundPlaceOrder}
 	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundSettleOrdersV2] = &MethodDexFundSettleOrders{cabi.MethodNameDexFundSettleOrdersV2}
@@ -217,10 +218,40 @@ func newEarthContracts() map[types.Address]*builtinContract {
 	return contracts
 }
 
+func newDeFiContracts() map[types.Address]*builtinContract {
+	contracts := newEarthContracts()
+
+	contracts[types.AddressDeFi] = &builtinContract{
+		map[string]BuiltinContractMethod{
+			cabi.MethodNameDeFiDeposit:                     &MethodDeFiDeposit{cabi.MethodNameDeFiDeposit},
+			cabi.MethodNameDeFiWithdraw:                    &MethodDeFiWithdraw{cabi.MethodNameDeFiWithdraw},
+			cabi.MethodNameDeFiNewLoan:                     &MethodDeFiNewLoan{cabi.MethodNameDeFiNewLoan},
+			cabi.MethodNameDeFiCancelLoan:                  &MethodDeFiCancelLoan{cabi.MethodNameDeFiCancelLoan},
+			cabi.MethodNameDeFiSubscribe:                   &MethodDeFiSubscribe{cabi.MethodNameDeFiSubscribe},
+			cabi.MethodNameDeFiInvest:                      &MethodDeFiInvest{cabi.MethodNameDeFiInvest},
+			cabi.MethodNameDeFiCancelInvest:                &MethodDeFiCancelInvest{cabi.MethodNameDeFiCancelInvest},
+			cabi.MethodNameDeFiRefundInvest:                &MethodDeFiRefundInvest{cabi.MethodNameDeFiRefundInvest},
+			cabi.MethodNameDeFiDelegateStakeCallback:       &MethodDeFiDelegateStakeCallback{cabi.MethodNameDeFiDelegateStakeCallback},
+			cabi.MethodNameDeFiCancelDelegateStakeCallback: &MethodDeFiCancelDelegateStakeCallback{cabi.MethodNameDeFiCancelDelegateStakeCallback},
+			cabi.MethodNameDeFiRegisterSBP:                 &MethodDeFiRegisterSBP{cabi.MethodNameDeFiRegisterSBP},
+			cabi.MethodNameDeFiUpdateSBPRegistration:       &MethodDeFiUpdateSBPRegistration{cabi.MethodNameDeFiUpdateSBPRegistration},
+			defaultMethodName:                              &MethodDeFiDefault{defaultMethodName},
+			cabi.MethodNameDeFiTriggerJob:                  &MethodDeFiTriggerJob{cabi.MethodNameDeFiTriggerJob},
+			cabi.MethodNameDeFiNotifyTime:                  &MethodDeFiNotifyTime{cabi.MethodNameDeFiNotifyTime},
+		}, cabi.ABIDeFi,
+	}
+
+	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundDelegateInvest] = &MethodDexFundDelegateInvest{cabi.MethodNameDexFundDelegateInvest}
+	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundCancelDelegateInvest] = &MethodDexFundCancelDelegateInvest{cabi.MethodNameDexFundCancelDelegateInvest}
+	return contracts
+}
+
 // GetBuiltinContractMethod finds method instance of built-in contract method by address and method id
 func GetBuiltinContractMethod(addr types.Address, methodSelector []byte, sbHeight uint64) (BuiltinContractMethod, bool, error) {
 	var contractsMap map[types.Address]*builtinContract
-	if fork.IsEarthFork(sbHeight) {
+	if fork.IsDeFiFork(sbHeight) {
+		contractsMap = deFiContracts
+	} else if fork.IsEarthFork(sbHeight) {
 		contractsMap = earthContracts
 	} else if fork.IsLeafFork(sbHeight) {
 		contractsMap = leafContracts
@@ -233,6 +264,13 @@ func GetBuiltinContractMethod(addr types.Address, methodSelector []byte, sbHeigh
 	}
 	p, addrExists := contractsMap[addr]
 	if addrExists {
+		if len(methodSelector) == 0 {
+			c, methodExists := p.m[defaultMethodName]
+			if methodExists {
+				return c, methodExists, nil
+			}
+			return nil, addrExists, util.ErrAbiMethodNotFound
+		}
 		if method, err := p.abi.MethodById(methodSelector); err == nil {
 			c, methodExists := p.m[method.Name]
 			if methodExists {

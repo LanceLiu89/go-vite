@@ -1,0 +1,152 @@
+syntax="proto3";
+
+package proto;
+
+//storage
+message BaseAccount {
+    bytes Available = 1;
+    bytes Subscribing = 2;
+    bytes Subscribed = 3;
+    bytes Invested = 4; //
+    bytes Locked = 5; //locked for loan interest to pay
+}
+
+message LoanAccount {
+    bytes Available = 1;
+    bytes Invested = 2;
+}
+
+message Account {
+    bytes Token = 1;
+    BaseAccount BaseAccount = 2;
+    LoanAccount LoanAccount = 3;
+}
+
+message Fund {
+    bytes Address = 1; // not set on save
+    repeated Account Accounts = 2;
+}
+
+//storage+event
+message Loan {
+    uint64 Id = 1;
+    bytes Address = 2;
+    bytes Token = 3;
+    bytes ShareAmount = 4;
+    int32 Shares = 5;
+    bytes Interest = 6;
+    int32 DayRate = 7;
+    int32 SubscribeDays = 8;
+    int32 ExpireDays = 9;
+    int32 SubscribedShares = 10;
+    uint64 StartHeight = 11;
+    uint64 ExpireHeight = 12;
+    bytes Invested = 13;
+    // 1 open, 2 success, 3 failed, 4 expired, 5 fail refunded, 6 expire refunded
+    int32 Status = 14;
+    int64 Created = 15;
+    int64 StartTime = 16;
+    int64 Updated = 17;
+}
+
+//storage+event
+message Subscription {
+    uint64 LoanId = 1;
+    bytes Address = 2;
+    bytes Token = 3;
+    bytes ShareAmount = 4;
+    int32 Shares = 5;
+    bytes Interest = 6;
+    // 1 open, 2 success, 3 failed, 4 expired, 5 fail refunded, 6 expire refunded
+    int32 Status = 7;
+    int64 Created = 8;
+    int64 Updated = 9;
+}
+
+//storage+event
+message Invest {
+    uint64 Id = 1;
+    uint64 LoanId = 2;
+    bytes Address = 3;
+    bytes LoanAmount = 4;
+    bytes BaseAmount = 5;
+    int32 BizType = 6;
+    bytes Beneficial = 7;
+    uint64 CreateHeight = 8;
+    //only used for can be cancel, not for auto cancel
+    uint64 ExpireHeight = 9;
+    // 1 pending, 2 success, 3 failed, 4 expired, 5 fail refunded, 6 expire refunded
+    int32 Status = 10;
+    bytes InvestHash = 11;
+    int64 Created = 12;
+    int64 Updated = 13;
+}
+
+message InvestQuotaInfo {
+    bytes Address = 1;
+    bytes Amount = 2;
+    uint64 InvestId = 3; // investId from sendBlock.Hash
+}
+
+message SBPRegistration {
+    uint64 InvestId = 1;
+    string Name = 2;
+    bytes ProducingAddress = 3;
+    bytes RewardWithdrawAddress = 4;
+}
+
+message TimeWithHeight {
+    int64 Timestamp = 1;
+    uint64 Height = 2;
+}
+
+//event
+message LoanUpdate {
+    uint64 Id = 1;
+    int32 SubscribedShares = 2;
+    bytes Invested = 3;
+    int32 Status = 4;
+    uint64 ExpireHeight = 5;
+    uint64 StartHeight = 6;
+    int64 Timestamp = 7;
+}
+
+//event
+message SubscriptionUpdate {
+    uint64 LoanId = 1;
+    bytes Address = 2;
+    int32 Shares = 3;
+    int32 Status = 5;
+    bytes Interest = 4;
+}
+
+//event
+message InvestUpdate {
+    uint64 Id = 1;
+    int32 Status = 2;
+}
+
+//event
+message BaseAccountUpdate {
+    bytes Address = 1;
+    // 1 deposit, 2 withdraw,
+    // 3 subscribe lock, 4 subscribe reduce, 5 subscribe failed release, 6 subscribe expire refund
+    // 7 loan interest lock, 8 loan interest reduce, 9 loan interest release, 10 subscribe interest income,
+    // 11 invest reduce, 12 invest refund
+    int32 BizType = 2;
+    // 1 mining stake, 2 SVIP stake, 3. reg SBP, 4 quota stake
+    int32 InvestType = 3;
+    uint64 LoanId = 4;
+    bytes Amount = 5;
+}
+
+//event
+message LoanAccountUpdate {
+    bytes Address = 1;
+    // 1 new success loan, 2 loan expired refund, 3 invest reduce, 4 invest refund
+    int32 BizType = 2;
+    // 1 mining stake, 2 SVIP stake, 3. reg SBP, 4 quota stake
+    int32 InvestType = 3;
+    uint64 LoanId = 4;
+    bytes Amount = 5;
+}

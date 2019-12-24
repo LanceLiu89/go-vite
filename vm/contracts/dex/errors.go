@@ -76,5 +76,7 @@ var (
 	DexFundUserNotExists            = errors.New("fund user doesn't exist.")
 	LockedVxAmountLeavedNotValidErr = errors.New("locked vx amount leaved not valid")
 
-	InternalErr = errors.New("internal error")
+	InvestInfoNotExistsErr          = errors.New("invest info not exists")
+
+	InternalErr                     = errors.New("internal error")
 )

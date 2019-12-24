@@ -11,3 +11,11 @@ func (vdb *vmDb) GetUnconfirmedBlocks(address types.Address) []*ledger.AccountBl
 func (vdb *vmDb) GetLatestAccountBlock(addr types.Address) (*ledger.AccountBlock, error) {
 	return vdb.chain.GetLatestAccountBlock(addr)
 }
+
+func (vdb *vmDb) GetCompleteBlockByHash(blockHash types.Hash) (*ledger.AccountBlock, error) {
+	return vdb.chain.GetCompleteBlockByHash(blockHash)
+}
+
+func (vdb *vmDb) GetAccountBlockByHash(blockHash types.Hash) (*ledger.AccountBlock, error) {
+	return vdb.chain.GetAccountBlockByHash(blockHash)
+}

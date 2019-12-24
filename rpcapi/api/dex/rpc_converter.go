@@ -444,6 +444,7 @@ type StakeInfo struct {
 	Bid              uint8  `json:"bid"`
 	Id               string `json:"id,omitempty"`
 	Principal        string `json:"principal,omitempty"`
+	InvestId         uint64 `json:"investId,omitempty"`
 }
 
 type VxUnlockList struct {
@@ -465,9 +466,11 @@ type CancelStakeList struct {
 }
 
 type CancelStake struct {
-	Amount           string `json:"amount"`
-	ExpirationTime   int64  `json:"expirationTime"`
-	ExpirationPeriod uint64 `json:"expirationPeriod"`
+	Amount           string   `json:"amount"`
+	ExpirationTime   int64    `json:"expirationTime"`
+	ExpirationPeriod uint64   `json:"expirationPeriod"`
+	InvestIds        []uint64 `json:"investIds"`
+	InvestedAmount   string   `json:"investedAmount"`
 }
 
 func UnlockListToRpc(unlocks *dex.VxUnlocks, pageIndex int, pageSize int, chain chain.Chain) *VxUnlockList {
@@ -497,13 +500,15 @@ func CancelStakeListToRpc(cancelStakes *dex.CancelStakes, pageIndex int, pageSiz
 	total := new(big.Int)
 	cancelStakeList := new(CancelStakeList)
 	var count = 0
-	for i, ul := range cancelStakes.Cancels {
-		amt := new(big.Int).SetBytes(ul.Amount)
+	for i, cl := range cancelStakes.Cancels {
+		amt := new(big.Int).SetBytes(cl.Amount)
 		if i >= pageIndex*pageSize && i < (pageIndex+1)*pageSize {
 			cancel := new(CancelStake)
 			cancel.Amount = amt.String()
-			cancel.ExpirationTime = genesisTime + int64((ul.PeriodId+1+uint64(dex.SchedulePeriods))*3600*24) + 1200
-			cancel.ExpirationPeriod = ul.PeriodId + 1 + uint64(dex.SchedulePeriods)
+			cancel.ExpirationTime = genesisTime + int64((cl.PeriodId+1+uint64(dex.SchedulePeriods))*3600*24) + 1200
+			cancel.ExpirationPeriod = cl.PeriodId + 1 + uint64(dex.SchedulePeriods)
+			cancel.InvestIds = cl.InvestIds
+			cancel.InvestedAmount = AmountBytesToString(cl.InvestedAmount)
 			cancelStakeList.Cancels = append(cancelStakeList.Cancels, cancel)
 		}
 		total.Add(total, amt)
@@ -520,6 +525,7 @@ type DelegateStakeInfo struct {
 	Principal string `json:"principal"`
 	Amount    string `json:"amount"`
 	Status    int    `json:"status"`
+	InvestId  uint64 `json:"investId"`
 }
 
 func DelegateStakeInfoToRpc(info *dex.DelegateStakeInfo) *DelegateStakeInfo {
@@ -533,6 +539,7 @@ func DelegateStakeInfoToRpc(info *dex.DelegateStakeInfo) *DelegateStakeInfo {
 	}
 	rpcInfo.Amount = AmountBytesToString(info.Amount)
 	rpcInfo.Status = int(info.Status)
+	rpcInfo.InvestId = info.InvestId
 	return rpcInfo
 }
 
@@ -541,4 +548,20 @@ type VIPStakingRpc struct {
 	ExpirationHeight string `json:"expirationHeight"`
 	ExpirationTime   int64  `json:"expirationTime"`
 	Id               string `json:"id,omitempty"`
+}
+
+type RpcInvestInfo struct {
+	StakeId string `json:"StakeId"`
+	BizType int32  `json:"BizType"`
+	Amount  string `json:"Amount"`
+	Status  int32  `json:"Status"`
+}
+
+func InvestInfoToRpc(info *dex.InvestInfo) *RpcInvestInfo {
+	rpcInfo := new(RpcInvestInfo)
+	rpcInfo.StakeId = hex.EncodeToString(info.StakeId)
+	rpcInfo.BizType = info.BizType
+	rpcInfo.Amount = AmountBytesToString(info.Amount)
+	rpcInfo.Status = info.Status
+	return rpcInfo
 }

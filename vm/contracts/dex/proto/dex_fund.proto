@@ -9,7 +9,7 @@ message Account {
     bytes Locked   = 3;
     bytes VxLocked = 4; // lock for dividend, will release after 7 days
     bytes VxUnlocking = 5;
-    bytes CancellingStake = 6;
+    bytes CancellingStake = 6; // include normalMining and invest mining
 }
 
 message VxUnlock {
@@ -18,12 +18,14 @@ message VxUnlock {
 }
 
 message VxUnlocks {
-    repeated VxUnlock Unlocks = 1;
+     repeated VxUnlock Unlocks = 1;
 }
 
 message CancelStake {
     uint64 PeriodId = 1;
     bytes Amount = 2;
+    repeated uint64 InvestIds = 3;
+    bytes InvestedAmount = 4;
 }
 
 message CancelStakes {
@@ -32,7 +34,7 @@ message CancelStakes {
 
 //storage
 message Fund {
-    bytes Address = 1;
+    bytes Address = 1; // not set on save
     repeated Account Accounts = 2;
 }
 
@@ -140,6 +142,14 @@ message DelegateStakeInfo {
     int32 Status = 5; // 0 pending, 1 confirmed, 2 cancelling
     uint64 SerialNo = 6;
     bytes Id = 7; //not set on serialize
+    uint64 InvestId = 8; // investId from sendBlock.Hash
+}
+
+message InvestInfo {
+    bytes StakeId = 1;
+    int32 BizType = 2;
+    bytes Amount = 3;
+    int32 Status = 4;
 }
 
 message DelegateStakeAddressIndex {

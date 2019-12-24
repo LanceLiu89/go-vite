@@ -8,6 +8,7 @@ import (
 	"github.com/vitelabs/go-vite/ledger"
 	"github.com/vitelabs/go-vite/vm/contracts/abi"
 	cabi "github.com/vitelabs/go-vite/vm/contracts/abi"
+	"github.com/vitelabs/go-vite/vm/contracts/common"
 	dexproto "github.com/vitelabs/go-vite/vm/contracts/dex/proto"
 	"github.com/vitelabs/go-vite/vm/util"
 	"github.com/vitelabs/go-vite/vm_db"
@@ -234,7 +235,7 @@ func OnTransferOwnerGetTokenInfoSuccess(db vm_db.VmDb, param *ParamGetTokenInfoC
 		return err
 	} else {
 		if bytes.Equal(action.Origin, param.Owner.Bytes()) ||
-			param.TokenId == ledger.ViteTokenId && bytes.Equal(action.Origin, initViteTokenOwner.Bytes()) && len(getValueFromDb(db, viteOwnerInitiated)) == 0 {
+			param.TokenId == ledger.ViteTokenId && bytes.Equal(action.Origin, initViteTokenOwner.Bytes()) && len(common.GetValueFromDb(db, viteOwnerInitiated)) == 0 {
 			tokenInfo := newTokenInfoFromCallback(db, param)
 			tokenInfo.Owner = action.New
 			SaveTokenInfo(db, param.TokenId, tokenInfo)
@@ -335,9 +336,9 @@ func RenderOrder(order *Order, param *ParamPlaceOrder, db vm_db.VmDb, accountAdd
 	if order.Type == Limited {
 		order.Amount = CalculateRawAmount(order.Quantity, order.Price, marketInfo.TradeTokenDecimals-marketInfo.QuoteTokenDecimals)
 		if !order.Side { //buy
-			order.LockedBuyFee = CalculateAmountForRate(order.Amount, MaxTotalFeeRate(*order))
+			order.LockedBuyFee = common.CalculateAmountForRate(order.Amount, MaxTotalFeeRate(*order), RateCardinalNum)
 		}
-		totalAmount := AddBigInt(order.Amount, order.LockedBuyFee)
+		totalAmount := common.AddBigInt(order.Amount, order.LockedBuyFee)
 		if isAmountTooSmall(db, totalAmount, marketInfo) {
 			return marketInfo, OrderAmountTooSmallErr
 		}
@@ -363,7 +364,7 @@ func isAmountTooSmall(db vm_db.VmDb, amount []byte, marketInfo *MarketInfo) bool
 	if typeInfo.Decimals == marketInfo.QuoteTokenDecimals {
 		return new(big.Int).SetBytes(amount).Cmp(tradeThreshold) < 0
 	} else {
-		return AdjustAmountForDecimalsDiff(amount, marketInfo.QuoteTokenDecimals-typeInfo.Decimals).Cmp(tradeThreshold) < 0
+		return common.AdjustAmountForDecimalsDiff(amount, marketInfo.QuoteTokenDecimals-typeInfo.Decimals).Cmp(tradeThreshold) < 0
 	}
 }
 
@@ -412,7 +413,7 @@ func CheckAndLockFundForNewOrder(dexFund *Fund, order *Order, marketInfo *Market
 	case false: //buy
 		lockToken = marketInfo.QuoteToken
 		if order.Type == Limited {
-			lockAmount = AddBigInt(order.Amount, order.LockedBuyFee)
+			lockAmount = common.AddBigInt(order.Amount, order.LockedBuyFee)
 		}
 	case true: // sell
 		lockToken = marketInfo.TradeToken
@@ -431,7 +432,7 @@ func CheckAndLockFundForNewOrder(dexFund *Fund, order *Order, marketInfo *Market
 		return ExceedFundAvailableErr
 	}
 	account.Available = available.Bytes()
-	account.Locked = AddBigInt(account.Locked, lockAmountToInc.Bytes())
+	account.Locked = common.AddBigInt(account.Locked, lockAmountToInc.Bytes())
 	return
 }
 
@@ -443,7 +444,7 @@ func newTokenInfoFromCallback(db vm_db.VmDb, param *ParamGetTokenInfoCallback) *
 	tokenInfo.Index = int32(param.Index)
 	if param.TokenId == ledger.ViteTokenId {
 		tokenInfo.Owner = initViteTokenOwner.Bytes()
-		setValueToDb(db, viteOwnerInitiated, []byte{1})
+		common.SetValueToDb(db, viteOwnerInitiated, []byte{1})
 	} else {
 		tokenInfo.Owner = param.Owner.Bytes()
 	}

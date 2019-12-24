@@ -7,6 +7,7 @@ import (
 	"github.com/vitelabs/go-vite/ledger"
 	"github.com/vitelabs/go-vite/log15"
 	cabi "github.com/vitelabs/go-vite/vm/contracts/abi"
+	"github.com/vitelabs/go-vite/vm/contracts/common"
 	"github.com/vitelabs/go-vite/vm/contracts/dex"
 	dexproto "github.com/vitelabs/go-vite/vm/contracts/dex/proto"
 	"github.com/vitelabs/go-vite/vm/util"
@@ -224,7 +225,7 @@ func OnPlaceOrderFailed(db vm_db.VmDb, order *dex.Order, marketInfo *dex.MarketI
 	switch order.Side {
 	case false: // buy
 		accountSettle.IsTradeToken = false
-		accountSettle.ReleaseLocked = dex.AddBigInt(order.Amount, order.LockedBuyFee)
+		accountSettle.ReleaseLocked = common.AddBigInt(order.Amount, order.LockedBuyFee)
 	case true: // sell
 		accountSettle.IsTradeToken = true
 		accountSettle.ReleaseLocked = order.Quantity

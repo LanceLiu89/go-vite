@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/vitelabs/go-vite/ledger"
 	cabi "github.com/vitelabs/go-vite/vm/contracts/abi"
+	"github.com/vitelabs/go-vite/vm/contracts/common"
 	"math/big"
 	"strconv"
 	"testing"
@@ -87,7 +88,7 @@ func TestRandomBytesFromBytes(t *testing.T) {
 	for i := 1; i < 3000; i++ {
 		codeBytes, ok := randomBytesFromBytes(data, codeBytes, 0, 32)
 		assert.True(t, ok)
-		resStr := strconv.Itoa(int(BytesToUint32(codeBytes)))
+		resStr := strconv.Itoa(int(common.BytesToUint32(codeBytes)))
 		_, ok = resMap[resStr]
 		if ok {
 			break

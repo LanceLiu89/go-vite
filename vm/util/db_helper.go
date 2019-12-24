@@ -18,6 +18,8 @@ type dbInterface interface {
 	IsContractAccount() (bool, error)
 	GetContractCode() ([]byte, error)
 	GetContractCodeBySnapshotBlock(addr *types.Address, snapshotBlock *ledger.SnapshotBlock) ([]byte, error)
+	GetCompleteBlockByHash(blockHash types.Hash) (*ledger.AccountBlock, error)
+	GetAccountBlockByHash(blockHash types.Hash) (*ledger.AccountBlock, error)
 }
 
 // AddBalance add balance of certain token to current account.
@@ -79,4 +81,18 @@ func GetContractCode(db dbInterface, addr *types.Address, status GlobalStatus) (
 		return code[:contractTypeSize], code[contractTypeSize:]
 	}
 	return nil, nil
+}
+
+func GetOriginalSendHash(db dbInterface, requestHash types.Hash) *types.Hash {
+	ab, err := db.GetCompleteBlockByHash(requestHash)
+	DealWithErr(err)
+	return &ab.FromBlockHash
+}
+
+func GetOriginalSendBlock(db dbInterface, requestHash types.Hash) *ledger.AccountBlock {
+	ab, err := db.GetCompleteBlockByHash(requestHash)
+	DealWithErr(err)
+	b, err := db.GetAccountBlockByHash(ab.FromBlockHash)
+	DealWithErr(err)
+	return b
 }

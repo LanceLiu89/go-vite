@@ -5,6 +5,7 @@ import (
 	"github.com/vitelabs/go-vite/common/types"
 	"github.com/vitelabs/go-vite/crypto"
 	"github.com/vitelabs/go-vite/ledger"
+	"github.com/vitelabs/go-vite/vm/contracts/common"
 	"github.com/vitelabs/go-vite/vm/contracts/dex/proto"
 	"github.com/vitelabs/go-vite/vm_db"
 	"math/big"
@@ -13,7 +14,6 @@ import (
 const maxTxsCountPerTaker = 100
 const timeoutSecond = 30 * 24 * 3600
 const txIdLength = 20
-const bigFloatPrec = 120
 
 type Matcher struct {
 	db          vm_db.VmDb
@@ -88,7 +88,7 @@ func (mc *Matcher) GetFees() map[types.Address]*proto.FeeSettle {
 }
 
 func (mc *Matcher) GetOrderById(orderId []byte) (*Order, error) {
-	if data := getValueFromDb(mc.db, orderId); len(data) > 0 {
+	if data := common.GetValueFromDb(mc.db, orderId); len(data) > 0 {
 		order := &Order{}
 		if err := order.DeSerializeCompact(data, orderId); err != nil {
 			return nil, err
@@ -213,14 +213,14 @@ func (mc *Matcher) handleRefund(order *Order) {
 		switch order.Side {
 		case false: //buy
 			order.RefundToken = mc.MarketInfo.QuoteToken
-			refundAmount := SubBigIntAbs(order.Amount, order.ExecutedAmount)
-			refundFee := SubBigIntAbs(SubBigIntAbs(order.LockedBuyFee, order.ExecutedBaseFee), order.ExecutedOperatorFee)
-			order.RefundQuantity = AddBigInt(refundAmount, refundFee)
+			refundAmount := common.SubBigIntAbs(order.Amount, order.ExecutedAmount)
+			refundFee := common.SubBigIntAbs(common.SubBigIntAbs(order.LockedBuyFee, order.ExecutedBaseFee), order.ExecutedOperatorFee)
+			order.RefundQuantity = common.AddBigInt(refundAmount, refundFee)
 		case true:
 			order.RefundToken = mc.MarketInfo.TradeToken
-			order.RefundQuantity = SubBigIntAbs(order.Quantity, order.ExecutedQuantity)
+			order.RefundQuantity = common.SubBigIntAbs(order.Quantity, order.ExecutedQuantity)
 		}
-		if CmpToBigZero(order.RefundQuantity) > 0 {
+		if common.CmpToBigZero(order.RefundQuantity) > 0 {
 			mc.updateFundSettle(order.Address, proto.AccountSettle{IsTradeToken: order.Side, ReleaseLocked: order.RefundQuantity})
 		} else {
 			order.RefundToken = nil
@@ -278,15 +278,15 @@ func (mc *Matcher) handleTxFundSettle(tx OrderTx) {
 		makerOutSettle.ReduceLocked = tx.Quantity
 
 		takerOutSettle.IsTradeToken = false
-		takerOutSettle.ReduceLocked = AddBigInt(tx.Amount, AddBigInt(tx.TakerFee, tx.TakerOperatorFee))
+		takerOutSettle.ReduceLocked = common.AddBigInt(tx.Amount, common.AddBigInt(tx.TakerFee, tx.TakerOperatorFee))
 		makerInSettle.IsTradeToken = false
-		makerInSettle.IncAvailable = SubBigIntAbs(tx.Amount, AddBigInt(tx.MakerFee, tx.MakerOperatorFee))
+		makerInSettle.IncAvailable = common.SubBigIntAbs(tx.Amount, common.AddBigInt(tx.MakerFee, tx.MakerOperatorFee))
 
 	case true: //sell
 		takerInSettle.IsTradeToken = false
-		takerInSettle.IncAvailable = SubBigIntAbs(tx.Amount, AddBigInt(tx.TakerFee, tx.TakerOperatorFee))
+		takerInSettle.IncAvailable = common.SubBigIntAbs(tx.Amount, common.AddBigInt(tx.TakerFee, tx.TakerOperatorFee))
 		makerOutSettle.IsTradeToken = false
-		makerOutSettle.ReduceLocked = AddBigInt(tx.Amount, AddBigInt(tx.MakerFee, tx.MakerOperatorFee))
+		makerOutSettle.ReduceLocked = common.AddBigInt(tx.Amount, common.AddBigInt(tx.MakerFee, tx.MakerOperatorFee))
 
 		takerOutSettle.IsTradeToken = true
 		takerOutSettle.ReduceLocked = tx.Quantity
@@ -318,9 +318,9 @@ func (mc *Matcher) updateFundSettle(addressBytes []byte, settle proto.AccountSet
 		ac = &proto.AccountSettle{IsTradeToken: settle.IsTradeToken}
 		settleMap[settle.IsTradeToken] = ac
 	}
-	ac.IncAvailable = AddBigInt(ac.IncAvailable, settle.IncAvailable)
-	ac.ReleaseLocked = AddBigInt(ac.ReleaseLocked, settle.ReleaseLocked)
-	ac.ReduceLocked = AddBigInt(ac.ReduceLocked, settle.ReduceLocked)
+	ac.IncAvailable = common.AddBigInt(ac.IncAvailable, settle.IncAvailable)
+	ac.ReleaseLocked = common.AddBigInt(ac.ReleaseLocked, settle.ReleaseLocked)
+	ac.ReduceLocked = common.AddBigInt(ac.ReduceLocked, settle.ReduceLocked)
 }
 
 func (mc *Matcher) updateFee(address []byte, feeAmt, operatorFee []byte) {
@@ -334,8 +334,8 @@ func (mc *Matcher) updateFee(address []byte, feeAmt, operatorFee []byte) {
 		feeSettle = &proto.FeeSettle{Address: address, BaseFee: feeAmt, OperatorFee: operatorFee}
 		mc.feeSettles[addr] = feeSettle
 	} else {
-		feeSettle.BaseFee = AddBigInt(feeSettle.BaseFee, feeAmt)
-		feeSettle.OperatorFee = AddBigInt(feeSettle.OperatorFee, operatorFee)
+		feeSettle.BaseFee = common.AddBigInt(feeSettle.BaseFee, feeAmt)
+		feeSettle.OperatorFee = common.AddBigInt(feeSettle.OperatorFee, operatorFee)
 	}
 }
 
@@ -348,7 +348,7 @@ func (mc *Matcher) saveOrder(order Order, isTaker bool) {
 	if data, err := order.SerializeCompact(); err != nil {
 		panic(err)
 	} else {
-		setValueToDb(mc.db, orderId, data)
+		common.SetValueToDb(mc.db, orderId, data)
 	}
 	if isTaker && len(order.SendHash) > 0 {
 		SaveHashMapOrderId(mc.db, order.SendHash, orderId)
@@ -356,7 +356,7 @@ func (mc *Matcher) saveOrder(order Order, isTaker bool) {
 }
 
 func (mc *Matcher) deleteOrder(order *Order) {
-	setValueToDb(mc.db, order.Id, nil)
+	common.SetValueToDb(mc.db, order.Id, nil)
 	if len(order.SendHash) > 0 {
 		DeleteHashMapOrderId(mc.db, order.SendHash)
 	}
@@ -369,10 +369,10 @@ func calculateOrderAndTx(taker, maker *Order, marketInfo *MarketInfo, isDexFeeFo
 	tx.TakerId = taker.Id
 	tx.MakerId = maker.Id
 	tx.Price = maker.Price
-	executeQuantity := MinBigInt(SubBigIntAbs(taker.Quantity, taker.ExecutedQuantity), SubBigIntAbs(maker.Quantity, maker.ExecutedQuantity))
+	executeQuantity := common.MinBigInt(common.SubBigIntAbs(taker.Quantity, taker.ExecutedQuantity), common.SubBigIntAbs(maker.Quantity, maker.ExecutedQuantity))
 	takerAmount := calculateOrderAmount(taker, executeQuantity, maker.Price, marketInfo.TradeTokenDecimals-marketInfo.QuoteTokenDecimals)
 	makerAmount := calculateOrderAmount(maker, executeQuantity, maker.Price, marketInfo.TradeTokenDecimals-marketInfo.QuoteTokenDecimals)
-	executeAmount := MinBigInt(takerAmount, makerAmount)
+	executeAmount := common.MinBigInt(takerAmount, makerAmount)
 	//fmt.Printf("calculateOrderAndTx executeQuantity %v, takerAmount %v, makerAmount %v, executeAmount %v\n", new(big.Int).SetBytes(executeQuantity).String(), new(big.Int).SetBytes(takerAmount).String(), new(big.Int).SetBytes(makerAmount).String(), new(big.Int).SetBytes(executeAmount).String())
 	takerFee, takerExecutedFee, takerOperatorFee, takerExecutedOperatorFee := CalculateFeeAndExecutedFee(taker, executeAmount, taker.TakerFeeRate, taker.TakerOperatorFeeRate, isDexFeeFork)
 	makerFee, makerExecutedFee, makerOperatorFee, makerExecutedOperatorFee := CalculateFeeAndExecutedFee(maker, executeAmount, maker.MakerFeeRate, maker.MakerOperatorFeeRate, isDexFeeFork)
@@ -394,16 +394,16 @@ func calculateOrderAndTx(taker, maker *Order, marketInfo *MarketInfo, isDexFeeFo
 
 func calculateOrderAmount(order *Order, quantity []byte, price []byte, decimalsDiff int32) []byte {
 	amount := CalculateRawAmount(quantity, price, decimalsDiff)
-	if !order.Side && new(big.Int).SetBytes(order.Amount).Cmp(new(big.Int).SetBytes(AddBigInt(order.ExecutedAmount, amount))) < 0 { // side is buy
-		amount = SubBigIntAbs(order.Amount, order.ExecutedAmount)
+	if !order.Side && new(big.Int).SetBytes(order.Amount).Cmp(new(big.Int).SetBytes(common.AddBigInt(order.ExecutedAmount, amount))) < 0 { // side is buy
+		amount = common.SubBigIntAbs(order.Amount, order.ExecutedAmount)
 	}
 	return amount
 }
 
 func updateOrder(order *Order, quantity []byte, amount []byte, executedBaseFee, executedOperatorFee []byte, decimalsDiff int32) []byte {
-	order.ExecutedAmount = AddBigInt(order.ExecutedAmount, amount)
-	if bytes.Equal(SubBigIntAbs(order.Quantity, order.ExecutedQuantity), quantity) ||
-		order.Type == Market && !order.Side && bytes.Equal(SubBigIntAbs(order.Amount, order.ExecutedAmount), amount) || // market buy order
+	order.ExecutedAmount = common.AddBigInt(order.ExecutedAmount, amount)
+	if bytes.Equal(common.SubBigIntAbs(order.Quantity, order.ExecutedQuantity), quantity) ||
+		order.Type == Market && !order.Side && bytes.Equal(common.SubBigIntAbs(order.Amount, order.ExecutedAmount), amount) || // market buy order
 		IsDust(order, quantity, decimalsDiff) {
 		order.Status = FullyExecuted
 	} else {
@@ -411,33 +411,23 @@ func updateOrder(order *Order, quantity []byte, amount []byte, executedBaseFee, 
 	}
 	order.ExecutedBaseFee = executedBaseFee
 	order.ExecutedOperatorFee = executedOperatorFee
-	order.ExecutedQuantity = AddBigInt(order.ExecutedQuantity, quantity)
+	order.ExecutedQuantity = common.AddBigInt(order.ExecutedQuantity, quantity)
 	return amount
 }
 
 // leave quantity is too small for calculate precision
 func IsDust(order *Order, quantity []byte, decimalsDiff int32) bool {
-	return CalculateRawAmountF(SubBigIntAbs(SubBigIntAbs(order.Quantity, order.ExecutedQuantity), quantity), order.Price, decimalsDiff).Cmp(new(big.Float).SetInt64(int64(1))) < 0
+	return CalculateRawAmountF(common.SubBigIntAbs(common.SubBigIntAbs(order.Quantity, order.ExecutedQuantity), quantity), order.Price, decimalsDiff).Cmp(new(big.Float).SetInt64(int64(1))) < 0
 }
 
 func CalculateRawAmount(quantity []byte, price []byte, decimalsDiff int32) []byte {
-	return RoundAmount(CalculateRawAmountF(quantity, price, decimalsDiff)).Bytes()
+	return common.RoundAmount(CalculateRawAmountF(quantity, price, decimalsDiff)).Bytes()
 }
 
 func CalculateRawAmountF(quantity []byte, price []byte, decimalsDiff int32) *big.Float {
-	qtF := new(big.Float).SetPrec(bigFloatPrec).SetInt(new(big.Int).SetBytes(quantity))
-	prF, _ := new(big.Float).SetPrec(bigFloatPrec).SetString(BytesToPrice(price))
-	return AdjustForDecimalsDiff(new(big.Float).SetPrec(bigFloatPrec).Mul(prF, qtF), decimalsDiff)
-}
-
-func CalculateAmountForRate(amount []byte, rate int32) []byte {
-	if rate > 0 {
-		amtF := new(big.Float).SetPrec(bigFloatPrec).SetInt(new(big.Int).SetBytes(amount))
-		rateF, _ := new(big.Float).SetPrec(bigFloatPrec).SetString(CardinalRateToString(rate))
-		return RoundAmount(new(big.Float).SetPrec(bigFloatPrec).Mul(amtF, rateF)).Bytes()
-	} else {
-		return nil
-	}
+	qtF := new(big.Float).SetPrec(common.BigFloatPrec).SetInt(new(big.Int).SetBytes(quantity))
+	prF, _ := new(big.Float).SetPrec(common.BigFloatPrec).SetString(BytesToPrice(price))
+	return common.AdjustForDecimalsDiff(new(big.Float).SetPrec(common.BigFloatPrec).Mul(prF, qtF), decimalsDiff)
 }
 
 func CalculateFeeAndExecutedFee(order *Order, amount []byte, feeRate, operatorFeeRate int32, isDexFeeFork bool) (incBaseFee, executedBaseFee, incOperatorFee, executedOperatorFee []byte) {
@@ -454,36 +444,36 @@ func calculateExecutedFee(amount []byte, feeRate int32, side bool, originExecute
 	if feeRate == 0 {
 		return nil, originExecutedFee, true
 	}
-	incFee = CalculateAmountForRate(amount, feeRate)
+	incFee = common.CalculateAmountForRate(amount, feeRate, RateCardinalNum)
 	switch side {
 	case false:
 		var totalUsedAmount []byte
 		for _, usedAmt := range usedAmounts {
-			totalUsedAmount = AddBigInt(totalUsedAmount, usedAmt)
+			totalUsedAmount = common.AddBigInt(totalUsedAmount, usedAmt)
 		}
-		if CmpForBigInt(totalLockedAmount, totalUsedAmount) <= 0 {
+		if common.CmpForBigInt(totalLockedAmount, totalUsedAmount) <= 0 {
 			incFee = nil
 			newExecutedFee = originExecutedFee
 		} else {
-			totalUsedAmountNew := AddBigInt(totalUsedAmount, incFee)
-			if CmpForBigInt(totalLockedAmount, totalUsedAmountNew) <= 0 {
-				incFee = SubBigIntAbs(totalLockedAmount, totalUsedAmount)
+			totalUsedAmountNew := common.AddBigInt(totalUsedAmount, incFee)
+			if common.CmpForBigInt(totalLockedAmount, totalUsedAmountNew) <= 0 {
+				incFee = common.SubBigIntAbs(totalLockedAmount, totalUsedAmount)
 			} else {
 				leaved = true
 			}
-			newExecutedFee = AddBigInt(originExecutedFee, incFee)
+			newExecutedFee = common.AddBigInt(originExecutedFee, incFee)
 		}
 	case true:
-		newExecutedFee = AddBigInt(originExecutedFee, incFee)
+		newExecutedFee = common.AddBigInt(originExecutedFee, incFee)
 		leaved = true
 	}
 	return
 }
 
-func newLog(event DexEvent) *ledger.VmLog {
+func newLog(event common.Event) *ledger.VmLog {
 	log := &ledger.VmLog{}
 	log.Topics = append(log.Topics, event.GetTopicId())
-	log.Data = event.toDataBytes()
+	log.Data = event.ToDataBytes()
 	return log
 }
 

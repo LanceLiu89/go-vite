@@ -5,6 +5,7 @@ import (
 	"github.com/vitelabs/go-vite/common/types"
 	"github.com/vitelabs/go-vite/ledger"
 	cabi "github.com/vitelabs/go-vite/vm/contracts/abi"
+	"github.com/vitelabs/go-vite/vm/contracts/common"
 	"github.com/vitelabs/go-vite/vm_db"
 	"math/big"
 )
@@ -140,7 +141,7 @@ func DoFeesDividend(db vm_db.VmDb, periodId uint64) (blocks []*ledger.AccountBlo
 }
 
 func DoOperatorFeesDividend(db vm_db.VmDb, periodId uint64) error {
-	iterator, err := db.NewStorageIterator(append(operatorFeesKeyPrefix, Uint64ToBytes(periodId)...))
+	iterator, err := db.NewStorageIterator(append(operatorFeesKeyPrefix, common.Uint64ToBytes(periodId)...))
 	if err != nil {
 		panic(err)
 	}
@@ -192,8 +193,8 @@ func DoOperatorFeesDividend(db vm_db.VmDb, periodId uint64) error {
 
 func DivideByProportion(totalReferAmt, partReferAmt, dividedReferAmt, toDivideTotalAmt, toDivideLeaveAmt *big.Int) (proportionAmt *big.Int, finished bool) {
 	dividedReferAmt.Add(dividedReferAmt, partReferAmt)
-	proportion := new(big.Float).SetPrec(bigFloatPrec).Quo(new(big.Float).SetPrec(bigFloatPrec).SetInt(partReferAmt), new(big.Float).SetPrec(bigFloatPrec).SetInt(totalReferAmt))
-	proportionAmt = RoundAmount(new(big.Float).SetPrec(bigFloatPrec).Mul(new(big.Float).SetPrec(bigFloatPrec).SetInt(toDivideTotalAmt), proportion))
+	proportion := new(big.Float).SetPrec(common.BigFloatPrec).Quo(new(big.Float).SetPrec(common.BigFloatPrec).SetInt(partReferAmt), new(big.Float).SetPrec(common.BigFloatPrec).SetInt(totalReferAmt))
+	proportionAmt = common.RoundAmount(new(big.Float).SetPrec(common.BigFloatPrec).Mul(new(big.Float).SetPrec(common.BigFloatPrec).SetInt(toDivideTotalAmt), proportion))
 	toDivideLeaveNewAmt := new(big.Int).Sub(toDivideLeaveAmt, proportionAmt)
 	if toDivideLeaveNewAmt.Sign() <= 0 || dividedReferAmt.Cmp(totalReferAmt) >= 0 {
 		proportionAmt.Set(toDivideLeaveAmt)

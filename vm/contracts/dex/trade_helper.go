@@ -3,6 +3,7 @@ package dex
 import (
 	"bytes"
 	"github.com/vitelabs/go-vite/common/types"
+	"github.com/vitelabs/go-vite/vm/contracts/common"
 	dexproto "github.com/vitelabs/go-vite/vm/contracts/dex/proto"
 	"github.com/vitelabs/go-vite/vm_db"
 )
@@ -70,36 +71,36 @@ func CleanExpireOrders(db vm_db.VmDb, orderIds []byte) (map[types.Address]map[bo
 
 func GetMarketInfoById(db vm_db.VmDb, marketId int32) (marketInfo *MarketInfo, ok bool) {
 	marketInfo = &MarketInfo{}
-	ok = deserializeFromDb(db, GetMarketInfoKeyById(marketId), marketInfo)
+	ok = common.DeserializeFromDb(db, GetMarketInfoKeyById(marketId), marketInfo)
 	return
 }
 
 func SaveMarketInfoById(db vm_db.VmDb, marketInfo *MarketInfo) {
-	serializeToDb(db, GetMarketInfoKeyById(marketInfo.MarketId), marketInfo)
+	common.SerializeToDb(db, GetMarketInfoKeyById(marketInfo.MarketId), marketInfo)
 }
 
 func GetMarketInfoKeyById(marketId int32) []byte {
-	return append(marketByMarketIdPrefix, Uint32ToBytes(uint32(marketId))...)
+	return append(marketByMarketIdPrefix, common.Uint32ToBytes(uint32(marketId))...)
 }
 
 func SetTradeTimestamp(db vm_db.VmDb, timestamp int64) {
-	setValueToDb(db, tradeTimestampKey, Uint64ToBytes(uint64(timestamp)))
+	common.SetValueToDb(db, tradeTimestampKey, common.Uint64ToBytes(uint64(timestamp)))
 }
 
 func GetTradeTimestamp(db vm_db.VmDb) int64 {
-	if bs := getValueFromDb(db, tradeTimestampKey); len(bs) == 8 {
-		return int64(BytesToUint64(bs))
+	if bs := common.GetValueFromDb(db, tradeTimestampKey); len(bs) == 8 {
+		return int64(common.BytesToUint64(bs))
 	} else {
 		return 0
 	}
 }
 
 func SaveHashMapOrderId(db vm_db.VmDb, sendHash []byte, orderId []byte) {
-	setValueToDb(db, GetHashMapOrderIdKey(sendHash), orderId)
+	common.SetValueToDb(db, GetHashMapOrderIdKey(sendHash), orderId)
 }
 
 func GetOrderIdByHash(db vm_db.VmDb, sendHash []byte) ([]byte, bool) {
-	if orderId := getValueFromDb(db, GetHashMapOrderIdKey(sendHash)); len(orderId) == OrderIdBytesLength {
+	if orderId := common.GetValueFromDb(db, GetHashMapOrderIdKey(sendHash)); len(orderId) == OrderIdBytesLength {
 		return orderId, true
 	} else {
 		return nil, false
@@ -107,7 +108,7 @@ func GetOrderIdByHash(db vm_db.VmDb, sendHash []byte) ([]byte, bool) {
 }
 
 func DeleteHashMapOrderId(db vm_db.VmDb, sendHash []byte) {
-	setValueToDb(db, GetHashMapOrderIdKey(sendHash), nil)
+	common.SetValueToDb(db, GetHashMapOrderIdKey(sendHash), nil)
 }
 
 func GetHashMapOrderIdKey(sendHash []byte) []byte {

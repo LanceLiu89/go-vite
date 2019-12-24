@@ -78,6 +78,11 @@ func makeForkPointsConfig(genesisConfig *config.Genesis) *config.ForkPoints {
 				Height:  17142720,
 				Version: 7,
 			},
+
+			DeFiFork: &config.ForkPoint{
+				Height:  20000000,
+				Version: 7,
+			},
 		}
 	}
 }

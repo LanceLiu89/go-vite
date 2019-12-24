@@ -61,7 +61,10 @@ const (
 		{"type":"function","name":"StakeForPrincipalSVIP", "inputs":[{"name":"principal","type":"address"}]},
 		{"type":"function","name":"CancelStakeById", "inputs":[{"name":"id","type":"bytes32"}]},
 		{"type":"function","name":"StakeForQuotaWithCallbackCallback", "inputs":[{"name":"id","type":"bytes32"},{"name":"success","type":"bool"}]},
-		{"type":"function","name":"CancelQuotaStakingWithCallbackCallback", "inputs":[{"name":"id","type":"bytes32"},{"name":"success","type":"bool"}]}
+		{"type":"function","name":"CancelQuotaStakingWithCallbackCallback", "inputs":[{"name":"id","type":"bytes32"},{"name":"success","type":"bool"}]},
+  		{"type":"function","name":"DelegateInvest", "inputs":[{"name":"investId","type":"uint64"},{"name":"address","type":"address"},{"name":"bizType","type":"uint8"},{"name":"beneficiary","type":"address"}]},
+		{"type":"function","name":"CancelDelegateInvest", "inputs":[{"name":"investIds","type":"bytes"}]}
+
     ]`
 
 	// deprecated version
@@ -123,6 +126,10 @@ const (
 	MethodNameDexFundCancelStakeById               = "CancelStakeById"
 	MethodNameDexFundDelegateStakeCallbackV2       = "StakeForQuotaWithCallbackCallback"
 	MethodNameDexFundCancelDelegateStakeCallbackV2 = "CancelQuotaStakingWithCallbackCallback"
+
+	//v1.2
+	MethodNameDexFundDelegateInvest       = "DelegateInvest"
+	MethodNameDexFundCancelDelegateInvest = "CancelDelegateInvest"
 )
 
 var (

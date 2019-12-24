@@ -173,6 +173,14 @@ func IsEarthFork(snapshotHeight uint64) bool {
 	return snapshotHeight >= earthForkPoint.Height && IsForkActive(*earthForkPoint)
 }
 
+func IsDeFiFork(snapshotHeight uint64) bool {
+	deFiForkPoint, ok := forkPointMap["DeFiFork"]
+	if !ok {
+		panic("check deFi fork failed. DeFiFork is not existed.")
+	}
+	return snapshotHeight >= deFiForkPoint.Height && IsForkActive(*deFiForkPoint)
+}
+
 func IsDexMiningFork(snapshotHeight uint64) bool {
 	dexMiningForkPoint, ok := forkPointMap["DexMiningFork"]
 	if !ok {

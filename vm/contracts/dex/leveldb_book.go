@@ -2,6 +2,7 @@ package dex
 
 import (
 	"github.com/vitelabs/go-vite/interfaces"
+	"github.com/vitelabs/go-vite/vm/contracts/common"
 	"github.com/vitelabs/go-vite/vm_db"
 )
 
@@ -45,8 +46,8 @@ func (book *levelDbBook) release() {
 
 func getBookPrefix(book *levelDbBook) []byte {
 	if book.side {
-		return append(Uint32ToBytes(uint32(book.marketId))[1:], byte(int8(1)))
+		return append(common.Uint32ToBytes(uint32(book.marketId))[1:], byte(int8(1)))
 	} else {
-		return append(Uint32ToBytes(uint32(book.marketId))[1:], byte(int8(0)))
+		return append(common.Uint32ToBytes(uint32(book.marketId))[1:], byte(int8(0)))
 	}
 }

@@ -797,6 +797,18 @@ func (f DexPrivateApi) GetDelegateStakeInfoById(id types.Hash) (*apidex.Delegate
 	}
 }
 
+func (f DexPrivateApi) GetInvestInfo(investId uint64) (*apidex.RpcInvestInfo, error) {
+	if db, err := getVmDb(f.chain, types.AddressDexFund); err != nil {
+		return nil, err
+	} else {
+		if info, ok := dex.GetInvestStakeInfo(db, investId); ok {
+			return apidex.InvestInfoToRpc(info), nil
+		} else {
+			return nil, nil
+		}
+	}
+}
+
 func StakeListToDexRpc(stakeInfos []*dex.DelegateStakeInfo, totalAmount *big.Int, count int, chain chain.Chain) (*apidex.StakeInfoList, error) {
 	list := new(apidex.StakeInfoList)
 	list.StakeAmount = totalAmount.String()
@@ -814,6 +826,7 @@ func StakeListToDexRpc(stakeInfos []*dex.DelegateStakeInfo, totalAmount *big.Int
 			info.DelegateAddress = types.AddressDexFund.String()
 			info.StakeAddress = stakeAddr.String()
 			info.Bid = uint8(stakeInfo.StakeType)
+			info.InvestId = stakeInfo.InvestId
 			if snapshotBlock == nil {
 				if snapshotBlock, err = db.LatestSnapshotBlock(); err != nil {
 					return nil, err

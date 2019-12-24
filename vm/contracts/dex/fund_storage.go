@@ -11,6 +11,7 @@ import (
 	"github.com/vitelabs/go-vite/interfaces"
 	"github.com/vitelabs/go-vite/ledger"
 	"github.com/vitelabs/go-vite/vm/contracts/abi"
+	"github.com/vitelabs/go-vite/vm/contracts/common"
 	dexproto "github.com/vitelabs/go-vite/vm/contracts/dex/proto"
 	"github.com/vitelabs/go-vite/vm/util"
 	"github.com/vitelabs/go-vite/vm_db"
@@ -63,6 +64,8 @@ var (
 	delegateStakeInfoPrefix          = []byte("ds:")
 	delegateStakeAddressIndexPrefix  = []byte("dA:")
 	delegateStakeIndexSerialNoPrefix = []byte("dsISN:")
+
+	investStakeInfoPrefix = []byte("ivSt:")
 
 	miningStakingsKeyPrefix       = []byte("pldsVx:")  // miningStakings: types.Address
 	dexMiningStakingsKey          = []byte("pldsVxS:") // dexMiningStakings
@@ -231,6 +234,12 @@ const (
 	StakeConfirmed
 )
 
+//Invest status
+const (
+	InvestNormal = iota + 1
+	InvestCancelling
+)
+
 type QuoteTokenTypeInfo struct {
 	Decimals              int32
 	DefaultTradeThreshold *big.Int
@@ -365,13 +374,15 @@ type ParamDelegateStakeCallbackV2 struct {
 	Success bool
 }
 
-type Fund struct {
-	dexproto.Fund
+type ParamDelegateInvest struct {
+	InvestId    uint64
+	Address     types.Address
+	BizType     uint8
+	Beneficiary types.Address
 }
 
-type SerializableDex interface {
-	Serialize() ([]byte, error)
-	DeSerialize([]byte) error
+type Fund struct {
+	dexproto.Fund
 }
 
 func (df *Fund) Serialize() (data []byte, err error) {
@@ -676,6 +687,24 @@ func (cs *CancelStakes) DeSerialize(data []byte) error {
 	}
 }
 
+type InvestInfo struct {
+	dexproto.InvestInfo
+}
+
+func (iv *InvestInfo) Serialize() (data []byte, err error) {
+	return proto.Marshal(&iv.InvestInfo)
+}
+
+func (iv *InvestInfo) DeSerialize(data []byte) error {
+	investInfo := dexproto.InvestInfo{}
+	if err := proto.Unmarshal(data, &investInfo); err != nil {
+		return err
+	} else {
+		iv.InvestInfo = investInfo
+		return nil
+	}
+}
+
 func GetAccountByToken(fund *Fund, token types.TokenTypeId) (account *dexproto.Account, exists bool) {
 	for _, a := range fund.Accounts {
 		if bytes.Equal(token.Bytes(), a.Token) {
@@ -715,96 +744,97 @@ func GetAccounts(fund *Fund, tokenId *types.TokenTypeId) ([]*Account, error) {
 
 func GetFund(db vm_db.VmDb, address types.Address) (fund *Fund, ok bool) {
 	fund = &Fund{}
-	ok = deserializeFromDb(db, GetFundKey(address), fund)
+	ok = common.DeserializeFromDb(db, GetFundKey(address), fund)
 	return
 }
 
 func SaveFund(db vm_db.VmDb, address types.Address, fund *Fund) {
-	serializeToDb(db, GetFundKey(address), fund)
+	common.SerializeToDb(db, GetFundKey(address), fund)
 }
 
 func ReduceAccount(db vm_db.VmDb, address types.Address, tokenId []byte, amount *big.Int) (*dexproto.Account, error) {
-	return updateFund(db, address, tokenId, amount, func(acc *dexproto.Account, amt *big.Int) (*dexproto.Account, error) {
+	return updateFund(db, address, tokenId, func(acc *dexproto.Account) (*dexproto.Account, error) {
 		available := new(big.Int).SetBytes(acc.Available)
-		if available.Cmp(amt) < 0 {
+		if available.Cmp(amount) < 0 {
 			return nil, ExceedFundAvailableErr
 		} else {
-			acc.Available = available.Sub(available, amt).Bytes()
+			acc.Available = available.Sub(available, amount).Bytes()
 		}
 		return acc, nil
 	})
 }
 
 func LockVxForDividend(db vm_db.VmDb, address types.Address, amount *big.Int) (*dexproto.Account, error) {
-	return updateFund(db, address, VxTokenId.Bytes(), amount, func(acc *dexproto.Account, amt *big.Int) (*dexproto.Account, error) {
+	return updateFund(db, address, VxTokenId.Bytes(), func(acc *dexproto.Account) (*dexproto.Account, error) {
 		available := new(big.Int).SetBytes(acc.Available)
-		if available.Cmp(amt) < 0 {
+		if available.Cmp(amount) < 0 {
 			return nil, ExceedFundAvailableErr
 		} else {
-			acc.Available = available.Sub(available, amt).Bytes()
-			acc.VxLocked = AddBigInt(acc.VxLocked, amt.Bytes())
+			acc.Available = available.Sub(available, amount).Bytes()
+			acc.VxLocked = common.AddBigInt(acc.VxLocked, amount.Bytes())
 		}
 		return acc, nil
 	})
 }
 
 func ScheduleVxUnlockForDividend(db vm_db.VmDb, address types.Address, amount *big.Int) (updatedAcc *dexproto.Account, err error) {
-	return updateFund(db, address, VxTokenId.Bytes(), amount, func(acc *dexproto.Account, amt *big.Int) (*dexproto.Account, error) {
+	return updateFund(db, address, VxTokenId.Bytes(), func(acc *dexproto.Account) (*dexproto.Account, error) {
 		vxLocked := new(big.Int).SetBytes(acc.VxLocked)
-		if vxLocked.Cmp(amt) < 0 {
+		if vxLocked.Cmp(amount) < 0 {
 			return nil, ExceedFundAvailableErr
 		} else {
-			vxLocked.Sub(vxLocked, amt)
+			vxLocked.Sub(vxLocked, amount)
 			if vxLocked.Sign() != 0 && vxLocked.Cmp(VxDividendThreshold) < 0 {
 				return nil, LockedVxAmountLeavedNotValidErr
 			}
 			acc.VxLocked = vxLocked.Bytes()
-			acc.VxUnlocking = AddBigInt(acc.VxUnlocking, amt.Bytes())
+			acc.VxUnlocking = common.AddBigInt(acc.VxUnlocking, amount.Bytes())
 		}
 		return acc, nil
 	})
 }
 
 func FinishVxUnlockForDividend(db vm_db.VmDb, address types.Address, amount *big.Int) (*dexproto.Account, error) {
-	return updateFund(db, address, VxTokenId.Bytes(), amount, func(acc *dexproto.Account, amt *big.Int) (*dexproto.Account, error) {
+	return updateFund(db, address, VxTokenId.Bytes(), func(acc *dexproto.Account) (*dexproto.Account, error) {
 		vxUnlocking := new(big.Int).SetBytes(acc.VxUnlocking)
-		if vxUnlocking.Cmp(amt) < 0 {
+		if vxUnlocking.Cmp(amount) < 0 {
 			return nil, ExceedFundAvailableErr
 		} else {
-			acc.VxUnlocking = vxUnlocking.Sub(vxUnlocking, amt).Bytes()
-			acc.Available = AddBigInt(acc.Available, amt.Bytes())
+			acc.VxUnlocking = vxUnlocking.Sub(vxUnlocking, amount).Bytes()
+			acc.Available = common.AddBigInt(acc.Available, amount.Bytes())
 		}
 		return acc, nil
 	})
 }
 
 func ScheduleCancelStake(db vm_db.VmDb, address types.Address, amount *big.Int) (updatedAcc *dexproto.Account, err error) {
-	return updateFund(db, address, ledger.ViteTokenId.Bytes(), amount, func(acc *dexproto.Account, amt *big.Int) (*dexproto.Account, error) {
-		acc.CancellingStake = AddBigInt(acc.CancellingStake, amount.Bytes())
+	return updateFund(db, address, ledger.ViteTokenId.Bytes(), func(acc *dexproto.Account) (*dexproto.Account, error) {
+		acc.CancellingStake = common.AddBigInt(acc.CancellingStake, amount.Bytes())
 		return acc, nil
 	})
 }
 
-func FinishCancelStake(db vm_db.VmDb, address types.Address, amount *big.Int) (updatedAcc *dexproto.Account, err error) {
-	return updateFund(db, address, ledger.ViteTokenId.Bytes(), amount, func(acc *dexproto.Account, amt *big.Int) (*dexproto.Account, error) {
+func FinishCancelStake(db vm_db.VmDb, address types.Address, amount, investAmount *big.Int) (updatedAcc *dexproto.Account, err error) {
+	return updateFund(db, address, ledger.ViteTokenId.Bytes(), func(acc *dexproto.Account) (*dexproto.Account, error) {
+		total := new(big.Int).Add(amount, investAmount)
 		cancellingStakeAmount := new(big.Int).SetBytes(acc.CancellingStake)
-		if cancellingStakeAmount.Cmp(amt) < 0 {
+		if cancellingStakeAmount.Cmp(total) < 0 {
 			return nil, ExceedFundAvailableErr
 		} else {
-			acc.CancellingStake = cancellingStakeAmount.Sub(cancellingStakeAmount, amt).Bytes()
-			acc.Available = AddBigInt(acc.Available, amt.Bytes())
+			acc.CancellingStake = cancellingStakeAmount.Sub(cancellingStakeAmount, total).Bytes()
+			acc.Available = common.AddBigInt(acc.Available, amount.Bytes())
 		}
 		return acc, nil
 	})
 }
 
-func updateFund(db vm_db.VmDb, address types.Address, tokenId []byte, amount *big.Int, updateAccFunc func(*dexproto.Account, *big.Int) (*dexproto.Account, error)) (updatedAcc *dexproto.Account, err error) {
+func updateFund(db vm_db.VmDb, address types.Address, tokenId []byte, updateAccFunc func(*dexproto.Account) (*dexproto.Account, error)) (updatedAcc *dexproto.Account, err error) {
 	if fund, ok := GetFund(db, address); ok {
 		var foundAcc bool
 		for _, acc := range fund.Accounts {
 			if bytes.Equal(acc.Token, tokenId) {
 				foundAcc = true
-				if updatedAcc, err = updateAccFunc(acc, amount); err != nil {
+				if updatedAcc, err = updateAccFunc(acc); err != nil {
 					return
 				}
 				break
@@ -828,7 +858,7 @@ func BatchUpdateFund(db vm_db.VmDb, address types.Address, accounts map[types.To
 			return err
 		} else {
 			if amt, ok := accounts[tk]; ok {
-				acc.Available = AddBigInt(acc.Available, amt.Bytes())
+				acc.Available = common.AddBigInt(acc.Available, amt.Bytes())
 				delete(accounts, tk)
 			}
 		}
@@ -849,7 +879,7 @@ func DepositAccount(db vm_db.VmDb, address types.Address, token types.TokenTypeI
 	var foundToken bool
 	for _, acc := range userFund.Accounts {
 		if bytes.Equal(acc.Token, token.Bytes()) {
-			acc.Available = AddBigInt(acc.Available, amount.Bytes())
+			acc.Available = common.AddBigInt(acc.Available, amount.Bytes())
 			updatedAcc = acc
 			foundToken = true
 			break
@@ -870,7 +900,7 @@ func LockMinedVx(db vm_db.VmDb, address types.Address, amount *big.Int) (updated
 	var foundVxAcc bool
 	for _, acc := range userFund.Accounts {
 		if bytes.Equal(acc.Token, VxTokenId.Bytes()) {
-			acc.VxLocked = AddBigInt(acc.VxLocked, amount.Bytes())
+			acc.VxLocked = common.AddBigInt(acc.VxLocked, amount.Bytes())
 			updatedAcc = acc
 			foundVxAcc = true
 			break
@@ -941,7 +971,7 @@ func GetDexFeesByPeriodId(db vm_db.VmDb, periodId uint64) (*DexFeesByPeriod, boo
 
 func getDexFeesByKey(db vm_db.VmDb, feeKey []byte) (*DexFeesByPeriod, bool) {
 	dexFeesByPeriod := &DexFeesByPeriod{}
-	ok := deserializeFromDb(db, feeKey, dexFeesByPeriod)
+	ok := common.DeserializeFromDb(db, feeKey, dexFeesByPeriod)
 	return dexFeesByPeriod, ok
 }
 
@@ -976,16 +1006,16 @@ func GetNotFinishDividendDexFeesByPeriodMap(db vm_db.VmDb, periodId uint64) map[
 }
 
 func SaveDexFeesByPeriodId(db vm_db.VmDb, periodId uint64, dexFeesByPeriod *DexFeesByPeriod) {
-	serializeToDb(db, GetDexFeesKeyByPeriodId(periodId), dexFeesByPeriod)
+	common.SerializeToDb(db, GetDexFeesKeyByPeriodId(periodId), dexFeesByPeriod)
 }
 
 //dexFees used both by fee dividend and mined vx dividend
 func MarkDexFeesFinishDividend(db vm_db.VmDb, dexFeesByPeriod *DexFeesByPeriod, periodId uint64) {
 	if dexFeesByPeriod.FinishMine {
-		setValueToDb(db, GetDexFeesKeyByPeriodId(periodId), nil)
+		common.SetValueToDb(db, GetDexFeesKeyByPeriodId(periodId), nil)
 	} else {
 		dexFeesByPeriod.FinishDividend = true
-		serializeToDb(db, GetDexFeesKeyByPeriodId(periodId), dexFeesByPeriod)
+		common.SerializeToDb(db, GetDexFeesKeyByPeriodId(periodId), dexFeesByPeriod)
 	}
 }
 
@@ -1020,10 +1050,10 @@ func RollAndGentNewDexFeesByPeriod(db vm_db.VmDb, periodId uint64) (rolledDexFee
 
 func MarkDexFeesFinishMine(db vm_db.VmDb, dexFeesByPeriod *DexFeesByPeriod, periodId uint64) {
 	if dexFeesByPeriod.FinishDividend {
-		setValueToDb(db, GetDexFeesKeyByPeriodId(periodId), nil)
+		common.SetValueToDb(db, GetDexFeesKeyByPeriodId(periodId), nil)
 	} else {
 		dexFeesByPeriod.FinishMine = true
-		serializeToDb(db, GetDexFeesKeyByPeriodId(periodId), dexFeesByPeriod)
+		common.SerializeToDb(db, GetDexFeesKeyByPeriodId(periodId), dexFeesByPeriod)
 	}
 	if dexFeesByPeriod.LastValidPeriod > 0 {
 		markFormerDexFeesFinishMine(db, dexFeesByPeriod.LastValidPeriod)
@@ -1037,23 +1067,23 @@ func markFormerDexFeesFinishMine(db vm_db.VmDb, periodId uint64) {
 }
 
 func GetDexFeesKeyByPeriodId(periodId uint64) []byte {
-	return append(dexFeesKeyPrefix, Uint64ToBytes(periodId)...)
+	return append(dexFeesKeyPrefix, common.Uint64ToBytes(periodId)...)
 }
 
 func GetDexFeesLastPeriodIdForRoll(db vm_db.VmDb) uint64 {
-	if lastPeriodIdBytes := getValueFromDb(db, lastDexFeesPeriodIdKey); len(lastPeriodIdBytes) == 8 {
-		return BytesToUint64(lastPeriodIdBytes)
+	if lastPeriodIdBytes := common.GetValueFromDb(db, lastDexFeesPeriodIdKey); len(lastPeriodIdBytes) == 8 {
+		return common.BytesToUint64(lastPeriodIdBytes)
 	} else {
 		return 0
 	}
 }
 
 func SaveDexFeesLastPeriodIdForRoll(db vm_db.VmDb, periodId uint64) {
-	setValueToDb(db, lastDexFeesPeriodIdKey, Uint64ToBytes(periodId))
+	common.SetValueToDb(db, lastDexFeesPeriodIdKey, common.Uint64ToBytes(periodId))
 }
 
 func SaveCurrentOperatorFees(db vm_db.VmDb, reader util.ConsensusReader, operator []byte, operatorFeesByPeriod *OperatorFeesByPeriod) {
-	serializeToDb(db, GetCurrentOperatorFeesKey(db, reader, operator), operatorFeesByPeriod)
+	common.SerializeToDb(db, GetCurrentOperatorFeesKey(db, reader, operator), operatorFeesByPeriod)
 }
 
 func GetCurrentOperatorFees(db vm_db.VmDb, reader util.ConsensusReader, operator []byte) (*OperatorFeesByPeriod, bool) {
@@ -1069,31 +1099,31 @@ func GetCurrentOperatorFeesKey(db vm_db.VmDb, reader util.ConsensusReader, opera
 }
 
 func DeleteOperatorFeesByKey(db vm_db.VmDb, key []byte) {
-	setValueToDb(db, key, nil)
+	common.SetValueToDb(db, key, nil)
 }
 
 func getOperatorFeesByKey(db vm_db.VmDb, feeKey []byte) (*OperatorFeesByPeriod, bool) {
 	operatorFeesByPeriod := &OperatorFeesByPeriod{}
-	ok := deserializeFromDb(db, feeKey, operatorFeesByPeriod)
+	ok := common.DeserializeFromDb(db, feeKey, operatorFeesByPeriod)
 	return operatorFeesByPeriod, ok
 }
 
 func GetOperatorFeesKeyByPeriodIdAndAddress(periodId uint64, address []byte) []byte {
-	return append(append(operatorFeesKeyPrefix, Uint64ToBytes(periodId)...), address...)
+	return append(append(operatorFeesKeyPrefix, common.Uint64ToBytes(periodId)...), address...)
 }
 
 func GetUserFees(db vm_db.VmDb, address []byte) (userFees *UserFees, ok bool) {
 	userFees = &UserFees{}
-	ok = deserializeFromDb(db, GetUserFeesKey(address), userFees)
+	ok = common.DeserializeFromDb(db, GetUserFeesKey(address), userFees)
 	return
 }
 
 func SaveUserFees(db vm_db.VmDb, address []byte, userFees *UserFees) {
-	serializeToDb(db, GetUserFeesKey(address), userFees)
+	common.SerializeToDb(db, GetUserFeesKey(address), userFees)
 }
 
 func DeleteUserFees(db vm_db.VmDb, address []byte) {
-	setValueToDb(db, GetUserFeesKey(address), nil)
+	common.SetValueToDb(db, GetUserFeesKey(address), nil)
 }
 
 func TruncateUserFeesToPeriod(userFees *UserFees, periodId uint64) (truncated bool) {
@@ -1147,12 +1177,12 @@ func DeleteVxFundsWithForkCheck(db vm_db.VmDb, address []byte) {
 
 func GetVxFunds(db vm_db.VmDb, address []byte) (vxFunds *VxFunds, ok bool) {
 	vxFunds = &VxFunds{}
-	ok = deserializeFromDb(db, GetVxFundsKey(address), vxFunds)
+	ok = common.DeserializeFromDb(db, GetVxFundsKey(address), vxFunds)
 	return
 }
 
 func SaveVxFunds(db vm_db.VmDb, address []byte, vxFunds *VxFunds) {
-	serializeToDb(db, GetVxFundsKey(address), vxFunds)
+	common.SerializeToDb(db, GetVxFundsKey(address), vxFunds)
 }
 
 func MatchVxFundsByPeriod(vxFunds *VxFunds, periodId uint64, checkDelete bool) (bool, []byte, bool, bool) {
@@ -1188,7 +1218,7 @@ func CheckUserVxFundsCanBeDelete(vxFunds *VxFunds) bool {
 }
 
 func DeleteVxFunds(db vm_db.VmDb, address []byte) {
-	setValueToDb(db, GetVxFundsKey(address), nil)
+	common.SetValueToDb(db, GetVxFundsKey(address), nil)
 }
 
 func GetVxFundsKey(address []byte) []byte {
@@ -1197,16 +1227,16 @@ func GetVxFundsKey(address []byte) []byte {
 
 func GetVxLockedFunds(db vm_db.VmDb, address []byte) (vxFunds *VxFunds, ok bool) {
 	vxFunds = &VxFunds{}
-	ok = deserializeFromDb(db, GetVxLockedFundsKey(address), vxFunds)
+	ok = common.DeserializeFromDb(db, GetVxLockedFundsKey(address), vxFunds)
 	return
 }
 
 func SaveVxLockedFunds(db vm_db.VmDb, address []byte, vxFunds *VxFunds) {
-	serializeToDb(db, GetVxLockedFundsKey(address), vxFunds)
+	common.SerializeToDb(db, GetVxLockedFundsKey(address), vxFunds)
 }
 
 func DeleteVxLockedFunds(db vm_db.VmDb, address []byte) {
-	setValueToDb(db, GetVxLockedFundsKey(address), nil)
+	common.SetValueToDb(db, GetVxLockedFundsKey(address), nil)
 }
 
 func GetVxLockedFundsKey(address []byte) []byte {
@@ -1215,14 +1245,14 @@ func GetVxLockedFundsKey(address []byte) []byte {
 
 func SetAutoLockMinedVx(db vm_db.VmDb, address []byte, enable bool) {
 	if enable {
-		setValueToDb(db, GetVxAutoLockMinedVxKey(address), []byte{1})
+		common.SetValueToDb(db, GetVxAutoLockMinedVxKey(address), []byte{1})
 	} else {
-		setValueToDb(db, GetVxAutoLockMinedVxKey(address), nil)
+		common.SetValueToDb(db, GetVxAutoLockMinedVxKey(address), nil)
 	}
 }
 
 func IsAutoLockMinedVx(db vm_db.VmDb, address []byte) bool {
-	return len(getValueFromDb(db, GetVxAutoLockMinedVxKey(address))) > 0
+	return len(common.GetValueFromDb(db, GetVxAutoLockMinedVxKey(address))) > 0
 }
 
 func GetVxAutoLockMinedVxKey(address []byte) []byte {
@@ -1247,30 +1277,30 @@ func SaveVxSumFundsWithForkCheck(db vm_db.VmDb, vxSumFunds *VxFunds) {
 
 func GetVxSumFunds(db vm_db.VmDb) (vxSumFunds *VxFunds, ok bool) {
 	vxSumFunds = &VxFunds{}
-	ok = deserializeFromDb(db, vxSumFundsKey, vxSumFunds)
+	ok = common.DeserializeFromDb(db, vxSumFundsKey, vxSumFunds)
 	return
 }
 
 func SaveVxSumFunds(db vm_db.VmDb, vxSumFunds *VxFunds) {
-	serializeToDb(db, vxSumFundsKey, vxSumFunds)
+	common.SerializeToDb(db, vxSumFundsKey, vxSumFunds)
 }
 
 func GetVxLockedSumFunds(db vm_db.VmDb) (vxLockedSumFunds *VxFunds, ok bool) {
 	vxLockedSumFunds = &VxFunds{}
-	ok = deserializeFromDb(db, vxLockedSumFundsKey, vxLockedSumFunds)
+	ok = common.DeserializeFromDb(db, vxLockedSumFundsKey, vxLockedSumFunds)
 	return
 }
 
 func SaveVxLockedSumFunds(db vm_db.VmDb, vxLockedSumFunds *VxFunds) {
-	serializeToDb(db, vxLockedSumFundsKey, vxLockedSumFunds)
+	common.SerializeToDb(db, vxLockedSumFundsKey, vxLockedSumFunds)
 }
 
 func SaveMakerMiningPoolByPeriodId(db vm_db.VmDb, periodId uint64, amount *big.Int) {
-	setValueToDb(db, GetMarkerMiningPoolByPeriodIdKey(periodId), amount.Bytes())
+	common.SetValueToDb(db, GetMarkerMiningPoolByPeriodIdKey(periodId), amount.Bytes())
 }
 
 func GetMakerMiningPoolByPeriodId(db vm_db.VmDb, periodId uint64) *big.Int {
-	if amtBytes := getValueFromDb(db, GetMarkerMiningPoolByPeriodIdKey(periodId)); len(amtBytes) > 0 {
+	if amtBytes := common.GetValueFromDb(db, GetMarkerMiningPoolByPeriodIdKey(periodId)); len(amtBytes) > 0 {
 		return new(big.Int).SetBytes(amtBytes)
 	} else {
 		return new(big.Int)
@@ -1278,23 +1308,23 @@ func GetMakerMiningPoolByPeriodId(db vm_db.VmDb, periodId uint64) *big.Int {
 }
 
 func DeleteMakerMiningPoolByPeriodId(db vm_db.VmDb, periodId uint64) {
-	setValueToDb(db, GetMarkerMiningPoolByPeriodIdKey(periodId), nil)
+	common.SetValueToDb(db, GetMarkerMiningPoolByPeriodIdKey(periodId), nil)
 }
 
 func GetMarkerMiningPoolByPeriodIdKey(periodId uint64) []byte {
-	return append(makerMiningPoolByPeriodKey, Uint64ToBytes(periodId)...)
+	return append(makerMiningPoolByPeriodKey, common.Uint64ToBytes(periodId)...)
 }
 
 func GetLastJobPeriodIdByBizType(db vm_db.VmDb, bizType uint8) uint64 {
-	if lastPeriodIdBytes := getValueFromDb(db, GetLastJobPeriodIdKey(bizType)); len(lastPeriodIdBytes) == 8 {
-		return BytesToUint64(lastPeriodIdBytes)
+	if lastPeriodIdBytes := common.GetValueFromDb(db, GetLastJobPeriodIdKey(bizType)); len(lastPeriodIdBytes) == 8 {
+		return common.BytesToUint64(lastPeriodIdBytes)
 	} else {
 		return 0
 	}
 }
 
 func SaveLastJobPeriodIdByBizType(db vm_db.VmDb, periodId uint64, bizType uint8) {
-	setValueToDb(db, GetLastJobPeriodIdKey(bizType), Uint64ToBytes(periodId))
+	common.SetValueToDb(db, GetLastJobPeriodIdKey(bizType), common.Uint64ToBytes(periodId))
 }
 
 func GetLastJobPeriodIdKey(bizType uint8) []byte {
@@ -1302,15 +1332,15 @@ func GetLastJobPeriodIdKey(bizType uint8) []byte {
 }
 
 func GetFirstMinedVxPeriodId(db vm_db.VmDb) uint64 {
-	if firstMinedVxPeriodIdBytes := getValueFromDb(db, firstMinedVxPeriodIdKey); len(firstMinedVxPeriodIdBytes) == 8 {
-		return BytesToUint64(firstMinedVxPeriodIdBytes)
+	if firstMinedVxPeriodIdBytes := common.GetValueFromDb(db, firstMinedVxPeriodIdKey); len(firstMinedVxPeriodIdBytes) == 8 {
+		return common.BytesToUint64(firstMinedVxPeriodIdBytes)
 	} else {
 		return 0
 	}
 }
 
 func SaveFirstMinedVxPeriodId(db vm_db.VmDb, periodId uint64) {
-	setValueToDb(db, firstMinedVxPeriodIdKey, Uint64ToBytes(periodId))
+	common.SetValueToDb(db, firstMinedVxPeriodIdKey, common.Uint64ToBytes(periodId))
 }
 
 func IsValidVxAmountBytesForDividend(amount []byte) bool {
@@ -1386,16 +1416,16 @@ func AddToPendingNewMarkets(db vm_db.VmDb, tradeToken, quoteToken types.TokenTyp
 
 func GetPendingNewMarkets(db vm_db.VmDb) (pendingNewMarkets *PendingNewMarkets, ok bool) {
 	pendingNewMarkets = &PendingNewMarkets{}
-	ok = deserializeFromDb(db, pendingNewMarketActionsKey, pendingNewMarkets)
+	ok = common.DeserializeFromDb(db, pendingNewMarketActionsKey, pendingNewMarkets)
 	return
 }
 
 func SavePendingNewMarkets(db vm_db.VmDb, pendingNewMarkets *PendingNewMarkets) {
-	serializeToDb(db, pendingNewMarketActionsKey, pendingNewMarkets)
+	common.SerializeToDb(db, pendingNewMarketActionsKey, pendingNewMarkets)
 }
 
 func DeletePendingNewMarkets(db vm_db.VmDb) {
-	setValueToDb(db, pendingNewMarketActionsKey, nil)
+	common.SetValueToDb(db, pendingNewMarketActionsKey, nil)
 }
 
 //handle case on duplicate callback for getTokenInfo
@@ -1431,17 +1461,17 @@ func AddToPendingSetQuotes(db vm_db.VmDb, token types.TokenTypeId, quoteType uin
 }
 
 func SavePendingSetQuotes(db vm_db.VmDb, pendingSetQuotes *PendingSetQuotes) {
-	serializeToDb(db, pendingSetQuoteActionsKey, pendingSetQuotes)
+	common.SerializeToDb(db, pendingSetQuoteActionsKey, pendingSetQuotes)
 }
 
 func GetPendingSetQuotes(db vm_db.VmDb) (pendingSetQuotes *PendingSetQuotes, ok bool) {
 	pendingSetQuotes = &PendingSetQuotes{}
-	ok = deserializeFromDb(db, pendingSetQuoteActionsKey, pendingSetQuotes)
+	ok = common.DeserializeFromDb(db, pendingSetQuoteActionsKey, pendingSetQuotes)
 	return
 }
 
 func DeletePendingSetQuotes(db vm_db.VmDb) {
-	setValueToDb(db, pendingSetQuoteActionsKey, nil)
+	common.SetValueToDb(db, pendingSetQuoteActionsKey, nil)
 }
 
 //handle case on duplicate callback for getTokenInfo
@@ -1478,27 +1508,27 @@ func AddToPendingTransferTokenOwners(db vm_db.VmDb, token types.TokenTypeId, ori
 }
 
 func SavePendingTransferTokenOwners(db vm_db.VmDb, pendings *PendingTransferTokenOwnerActions) {
-	serializeToDb(db, pendingTransferTokenOwnerActionsKey, pendings)
+	common.SerializeToDb(db, pendingTransferTokenOwnerActionsKey, pendings)
 }
 
 func GetPendingTransferTokenOwners(db vm_db.VmDb) (pendings *PendingTransferTokenOwnerActions, ok bool) {
 	pendings = &PendingTransferTokenOwnerActions{}
-	ok = deserializeFromDb(db, pendingTransferTokenOwnerActionsKey, pendings)
+	ok = common.DeserializeFromDb(db, pendingTransferTokenOwnerActionsKey, pendings)
 	return
 }
 
 func DeletePendingTransferTokenOwners(db vm_db.VmDb) {
-	setValueToDb(db, pendingTransferTokenOwnerActionsKey, nil)
+	common.SetValueToDb(db, pendingTransferTokenOwnerActionsKey, nil)
 }
 
 func GetTokenInfo(db vm_db.VmDb, token types.TokenTypeId) (tokenInfo *TokenInfo, ok bool) {
 	tokenInfo = &TokenInfo{}
-	ok = deserializeFromDb(db, GetTokenInfoKey(token), tokenInfo)
+	ok = common.DeserializeFromDb(db, GetTokenInfoKey(token), tokenInfo)
 	return
 }
 
 func SaveTokenInfo(db vm_db.VmDb, token types.TokenTypeId, tokenInfo *TokenInfo) {
-	serializeToDb(db, GetTokenInfoKey(token), tokenInfo)
+	common.SerializeToDb(db, GetTokenInfoKey(token), tokenInfo)
 }
 
 func GetTokenInfoKey(token types.TokenTypeId) []byte {
@@ -1506,12 +1536,12 @@ func GetTokenInfoKey(token types.TokenTypeId) []byte {
 }
 
 func NewAndSaveMarketId(db vm_db.VmDb) (newId int32) {
-	if idBytes := getValueFromDb(db, marketIdKey); len(idBytes) == 0 {
+	if idBytes := common.GetValueFromDb(db, marketIdKey); len(idBytes) == 0 {
 		newId = 1
 	} else {
-		newId = int32(BytesToUint32(idBytes)) + 1
+		newId = int32(common.BytesToUint32(idBytes)) + 1
 	}
-	setValueToDb(db, marketIdKey, Uint32ToBytes(uint32(newId)))
+	common.SetValueToDb(db, marketIdKey, common.Uint32ToBytes(uint32(newId)))
 	return
 }
 
@@ -1527,16 +1557,16 @@ func GetMarketInfoByTokens(db vm_db.VmDb, tradeTokenData, quoteTokenData []byte)
 
 func GetMarketInfo(db vm_db.VmDb, tradeToken, quoteToken types.TokenTypeId) (marketInfo *MarketInfo, ok bool) {
 	marketInfo = &MarketInfo{}
-	ok = deserializeFromDb(db, GetMarketInfoKey(tradeToken, quoteToken), marketInfo)
+	ok = common.DeserializeFromDb(db, GetMarketInfoKey(tradeToken, quoteToken), marketInfo)
 	return
 }
 
 func SaveMarketInfo(db vm_db.VmDb, marketInfo *MarketInfo, tradeToken, quoteToken types.TokenTypeId) {
-	serializeToDb(db, GetMarketInfoKey(tradeToken, quoteToken), marketInfo)
+	common.SerializeToDb(db, GetMarketInfoKey(tradeToken, quoteToken), marketInfo)
 }
 
 func DeleteMarketInfo(db vm_db.VmDb, tradeToken, quoteToken types.TokenTypeId) {
-	setValueToDb(db, GetMarketInfoKey(tradeToken, quoteToken), nil)
+	common.SetValueToDb(db, GetMarketInfoKey(tradeToken, quoteToken), nil)
 }
 
 func GetMarketInfoKey(tradeToken, quoteToken types.TokenTypeId) []byte {
@@ -1549,7 +1579,7 @@ func GetMarketInfoKey(tradeToken, quoteToken types.TokenTypeId) []byte {
 
 func NewAndSaveOrderSerialNo(db vm_db.VmDb, timestamp int64) (newSerialNo int32) {
 	serialNo := &SerialNo{}
-	if ok := deserializeFromDb(db, orderIdSerialNoKey, serialNo); !ok {
+	if ok := common.DeserializeFromDb(db, orderIdSerialNoKey, serialNo); !ok {
 		newSerialNo = 0
 	} else {
 		if timestamp == serialNo.Timestamp {
@@ -1560,12 +1590,12 @@ func NewAndSaveOrderSerialNo(db vm_db.VmDb, timestamp int64) (newSerialNo int32)
 	}
 	serialNo.Timestamp = timestamp
 	serialNo.No = newSerialNo
-	serializeToDb(db, orderIdSerialNoKey, serialNo)
+	common.SerializeToDb(db, orderIdSerialNoKey, serialNo)
 	return
 }
 
 func IsOwner(db vm_db.VmDb, address types.Address) bool {
-	if storeOwner := getValueFromDb(db, ownerKey); len(storeOwner) == types.AddressSize {
+	if storeOwner := common.GetValueFromDb(db, ownerKey); len(storeOwner) == types.AddressSize {
 		return bytes.Equal(storeOwner, address.Bytes())
 	} else {
 		return address == initOwner
@@ -1573,7 +1603,7 @@ func IsOwner(db vm_db.VmDb, address types.Address) bool {
 }
 
 func GetOwner(db vm_db.VmDb) (*types.Address, error) {
-	if storeOwner := getValueFromDb(db, ownerKey); len(storeOwner) == types.AddressSize {
+	if storeOwner := common.GetValueFromDb(db, ownerKey); len(storeOwner) == types.AddressSize {
 		if owner, err := types.BytesToAddress(storeOwner); err == nil {
 			return &owner, nil
 		} else {
@@ -1585,11 +1615,11 @@ func GetOwner(db vm_db.VmDb) (*types.Address, error) {
 }
 
 func SetOwner(db vm_db.VmDb, address types.Address) {
-	setValueToDb(db, ownerKey, address.Bytes())
+	common.SetValueToDb(db, ownerKey, address.Bytes())
 }
 
 func GetTradeThreshold(db vm_db.VmDb, quoteTokenType int32) *big.Int {
-	if val := getValueFromDb(db, GetTradeThresholdKey(uint8(quoteTokenType))); len(val) > 0 {
+	if val := common.GetValueFromDb(db, GetTradeThresholdKey(uint8(quoteTokenType))); len(val) > 0 {
 		return new(big.Int).SetBytes(val)
 	} else {
 		return QuoteTokenTypeInfos[quoteTokenType].DefaultTradeThreshold
@@ -1597,7 +1627,7 @@ func GetTradeThreshold(db vm_db.VmDb, quoteTokenType int32) *big.Int {
 }
 
 func SaveTradeThreshold(db vm_db.VmDb, quoteTokenType uint8, amount *big.Int) {
-	setValueToDb(db, GetTradeThresholdKey(quoteTokenType), amount.Bytes())
+	common.SetValueToDb(db, GetTradeThresholdKey(quoteTokenType), amount.Bytes())
 }
 
 func GetTradeThresholdKey(quoteTokenType uint8) []byte {
@@ -1605,7 +1635,7 @@ func GetTradeThresholdKey(quoteTokenType uint8) []byte {
 }
 
 func GetMineThreshold(db vm_db.VmDb, quoteTokenType int32) *big.Int {
-	if val := getValueFromDb(db, GetMineThresholdKey(uint8(quoteTokenType))); len(val) > 0 {
+	if val := common.GetValueFromDb(db, GetMineThresholdKey(uint8(quoteTokenType))); len(val) > 0 {
 		return new(big.Int).SetBytes(val)
 	} else {
 		return QuoteTokenTypeInfos[quoteTokenType].DefaultMineThreshold
@@ -1613,7 +1643,7 @@ func GetMineThreshold(db vm_db.VmDb, quoteTokenType int32) *big.Int {
 }
 
 func SaveMineThreshold(db vm_db.VmDb, quoteTokenType uint8, amount *big.Int) {
-	setValueToDb(db, GetMineThresholdKey(quoteTokenType), amount.Bytes())
+	common.SetValueToDb(db, GetMineThresholdKey(quoteTokenType), amount.Bytes())
 }
 
 func GetMineThresholdKey(quoteTokenType uint8) []byte {
@@ -1621,7 +1651,7 @@ func GetMineThresholdKey(quoteTokenType uint8) []byte {
 }
 
 func GetMakerMiningAdmin(db vm_db.VmDb) *types.Address {
-	if mmaBytes := getValueFromDb(db, makerMiningAdminKey); len(mmaBytes) == types.AddressSize {
+	if mmaBytes := common.GetValueFromDb(db, makerMiningAdminKey); len(mmaBytes) == types.AddressSize {
 		if makerMiningAdmin, err := types.BytesToAddress(mmaBytes); err == nil {
 			return &makerMiningAdmin
 		} else {
@@ -1633,11 +1663,11 @@ func GetMakerMiningAdmin(db vm_db.VmDb) *types.Address {
 }
 
 func SaveMakerMiningAdmin(db vm_db.VmDb, addr types.Address) {
-	setValueToDb(db, makerMiningAdminKey, addr.Bytes())
+	common.SetValueToDb(db, makerMiningAdminKey, addr.Bytes())
 }
 
 func IsMakerMiningAdmin(db vm_db.VmDb, addr types.Address) bool {
-	if mmpBytes := getValueFromDb(db, makerMiningAdminKey); len(mmpBytes) == types.AddressSize {
+	if mmpBytes := common.GetValueFromDb(db, makerMiningAdminKey); len(mmpBytes) == types.AddressSize {
 		return bytes.Equal(addr.Bytes(), mmpBytes)
 	} else {
 		return false
@@ -1645,32 +1675,32 @@ func IsMakerMiningAdmin(db vm_db.VmDb, addr types.Address) bool {
 }
 
 func GetLastSettledMakerMinedVxPeriod(db vm_db.VmDb) uint64 {
-	if pIdBytes := getValueFromDb(db, lastSettledMakerMinedVxPeriodKey); len(pIdBytes) == 8 {
-		return BytesToUint64(pIdBytes)
+	if pIdBytes := common.GetValueFromDb(db, lastSettledMakerMinedVxPeriodKey); len(pIdBytes) == 8 {
+		return common.BytesToUint64(pIdBytes)
 	} else {
 		return 0
 	}
 }
 func SaveLastSettledMakerMinedVxPeriod(db vm_db.VmDb, periodId uint64) {
-	setValueToDb(db, lastSettledMakerMinedVxPeriodKey, Uint64ToBytes(periodId))
+	common.SetValueToDb(db, lastSettledMakerMinedVxPeriodKey, common.Uint64ToBytes(periodId))
 }
 
 func GetLastSettledMakerMinedVxPage(db vm_db.VmDb) int32 {
-	if pageBytes := getValueFromDb(db, lastSettledMakerMinedVxPageKey); len(pageBytes) == 4 {
-		return int32(BytesToUint32(pageBytes))
+	if pageBytes := common.GetValueFromDb(db, lastSettledMakerMinedVxPageKey); len(pageBytes) == 4 {
+		return int32(common.BytesToUint32(pageBytes))
 	} else {
 		return 0
 	}
 }
 func SaveLastSettledMakerMinedVxPage(db vm_db.VmDb, pageId int32) {
-	setValueToDb(db, lastSettledMakerMinedVxPageKey, Uint32ToBytes(uint32(pageId)))
+	common.SetValueToDb(db, lastSettledMakerMinedVxPageKey, common.Uint32ToBytes(uint32(pageId)))
 }
 func DeleteLastSettledMakerMinedVxPage(db vm_db.VmDb) {
-	setValueToDb(db, lastSettledMakerMinedVxPageKey, nil)
+	common.SetValueToDb(db, lastSettledMakerMinedVxPageKey, nil)
 }
 
 func GetMaintainer(db vm_db.VmDb) *types.Address {
-	if mtBytes := getValueFromDb(db, maintainerKey); len(mtBytes) == types.AddressSize {
+	if mtBytes := common.GetValueFromDb(db, maintainerKey); len(mtBytes) == types.AddressSize {
 		if maintainer, err := types.BytesToAddress(mtBytes); err == nil {
 			return &maintainer
 		} else {
@@ -1682,31 +1712,31 @@ func GetMaintainer(db vm_db.VmDb) *types.Address {
 }
 
 func SaveMaintainer(db vm_db.VmDb, addr types.Address) {
-	setValueToDb(db, maintainerKey, addr.Bytes())
+	common.SetValueToDb(db, maintainerKey, addr.Bytes())
 }
 
 func IsDexStopped(db vm_db.VmDb) bool {
-	stopped := getValueFromDb(db, dexStoppedKey)
+	stopped := common.GetValueFromDb(db, dexStoppedKey)
 	return len(stopped) > 0
 }
 
 func SaveDexStopped(db vm_db.VmDb, isStopDex bool) {
 	if isStopDex {
-		setValueToDb(db, dexStoppedKey, []byte{1})
+		common.SetValueToDb(db, dexStoppedKey, []byte{1})
 	} else {
-		setValueToDb(db, dexStoppedKey, nil)
+		common.SetValueToDb(db, dexStoppedKey, nil)
 	}
 }
 
 func ValidTimeOracle(db vm_db.VmDb, address types.Address) bool {
-	if timeOracleBytes := getValueFromDb(db, timeOracleKey); len(timeOracleBytes) == types.AddressSize {
+	if timeOracleBytes := common.GetValueFromDb(db, timeOracleKey); len(timeOracleBytes) == types.AddressSize {
 		return bytes.Equal(timeOracleBytes, address.Bytes())
 	}
 	return false
 }
 
 func GetTimeOracle(db vm_db.VmDb) *types.Address {
-	if timeOracleBytes := getValueFromDb(db, timeOracleKey); len(timeOracleBytes) == types.AddressSize {
+	if timeOracleBytes := common.GetValueFromDb(db, timeOracleKey); len(timeOracleBytes) == types.AddressSize {
 		address, _ := types.BytesToAddress(timeOracleBytes)
 		return &address
 	} else {
@@ -1715,18 +1745,18 @@ func GetTimeOracle(db vm_db.VmDb) *types.Address {
 }
 
 func SetTimeOracle(db vm_db.VmDb, address types.Address) {
-	setValueToDb(db, timeOracleKey, address.Bytes())
+	common.SetValueToDb(db, timeOracleKey, address.Bytes())
 }
 
 func ValidTriggerAddress(db vm_db.VmDb, address types.Address) bool {
-	if triggerAddressBytes := getValueFromDb(db, periodJobTriggerKey); len(triggerAddressBytes) == types.AddressSize {
+	if triggerAddressBytes := common.GetValueFromDb(db, periodJobTriggerKey); len(triggerAddressBytes) == types.AddressSize {
 		return bytes.Equal(triggerAddressBytes, address.Bytes())
 	}
 	return false
 }
 
 func GetPeriodJobTrigger(db vm_db.VmDb) *types.Address {
-	if triggerAddressBytes := getValueFromDb(db, periodJobTriggerKey); len(triggerAddressBytes) == types.AddressSize {
+	if triggerAddressBytes := common.GetValueFromDb(db, periodJobTriggerKey); len(triggerAddressBytes) == types.AddressSize {
 		address, _ := types.BytesToAddress(triggerAddressBytes)
 		return &address
 	} else {
@@ -1735,11 +1765,11 @@ func GetPeriodJobTrigger(db vm_db.VmDb) *types.Address {
 }
 
 func SetPeriodJobTrigger(db vm_db.VmDb, address types.Address) {
-	setValueToDb(db, periodJobTriggerKey, address.Bytes())
+	common.SetValueToDb(db, periodJobTriggerKey, address.Bytes())
 }
 
 func GetMiningStakedAmount(db vm_db.VmDb, address types.Address) *big.Int {
-	if bs := getValueFromDb(db, GetMiningStakedAmountKey(address)); len(bs) > 0 {
+	if bs := common.GetValueFromDb(db, GetMiningStakedAmountKey(address)); len(bs) > 0 {
 		return new(big.Int).SetBytes(bs)
 	} else {
 		return big.NewInt(0)
@@ -1747,11 +1777,11 @@ func GetMiningStakedAmount(db vm_db.VmDb, address types.Address) *big.Int {
 }
 
 func SaveMiningStakedAmount(db vm_db.VmDb, address types.Address, amount *big.Int) {
-	setValueToDb(db, GetMiningStakedAmountKey(address), amount.Bytes())
+	common.SetValueToDb(db, GetMiningStakedAmountKey(address), amount.Bytes())
 }
 
 func DeleteMiningStakedAmount(db vm_db.VmDb, address types.Address) {
-	setValueToDb(db, GetMiningStakedAmountKey(address), nil)
+	common.SetValueToDb(db, GetMiningStakedAmountKey(address), nil)
 }
 
 func GetMiningStakedAmountKey(address types.Address) []byte {
@@ -1759,7 +1789,7 @@ func GetMiningStakedAmountKey(address types.Address) []byte {
 }
 
 func GetMiningStakedV2Amount(db vm_db.VmDb, address types.Address) *big.Int {
-	if bs := getValueFromDb(db, GetMiningStakedV2AmountKey(address)); len(bs) > 0 {
+	if bs := common.GetValueFromDb(db, GetMiningStakedV2AmountKey(address)); len(bs) > 0 {
 		return new(big.Int).SetBytes(bs)
 	} else {
 		return big.NewInt(0)
@@ -1767,11 +1797,11 @@ func GetMiningStakedV2Amount(db vm_db.VmDb, address types.Address) *big.Int {
 }
 
 func SaveMiningStakedV2Amount(db vm_db.VmDb, address types.Address, amount *big.Int) {
-	setValueToDb(db, GetMiningStakedV2AmountKey(address), amount.Bytes())
+	common.SetValueToDb(db, GetMiningStakedV2AmountKey(address), amount.Bytes())
 }
 
 func DeleteMiningStakedV2Amount(db vm_db.VmDb, address types.Address) {
-	setValueToDb(db, GetMiningStakedV2AmountKey(address), nil)
+	common.SetValueToDb(db, GetMiningStakedV2AmountKey(address), nil)
 }
 
 func GetMiningStakedV2AmountKey(address types.Address) []byte {
@@ -1780,16 +1810,16 @@ func GetMiningStakedV2AmountKey(address types.Address) []byte {
 
 func GetVIPStaking(db vm_db.VmDb, address types.Address) (vipStaking *VIPStaking, ok bool) {
 	vipStaking = &VIPStaking{}
-	ok = deserializeFromDb(db, GetVIPStakingKey(address), vipStaking)
+	ok = common.DeserializeFromDb(db, GetVIPStakingKey(address), vipStaking)
 	return
 }
 
 func SaveVIPStaking(db vm_db.VmDb, address types.Address, vipStaking *VIPStaking) {
-	serializeToDb(db, GetVIPStakingKey(address), vipStaking)
+	common.SerializeToDb(db, GetVIPStakingKey(address), vipStaking)
 }
 
 func DeleteVIPStaking(db vm_db.VmDb, address types.Address) {
-	setValueToDb(db, GetVIPStakingKey(address), nil)
+	common.SetValueToDb(db, GetVIPStakingKey(address), nil)
 }
 
 func GetVIPStakingKey(address types.Address) []byte {
@@ -1798,16 +1828,16 @@ func GetVIPStakingKey(address types.Address) []byte {
 
 func GetSuperVIPStaking(db vm_db.VmDb, address types.Address) (superVIPStaking *VIPStaking, ok bool) {
 	superVIPStaking = &VIPStaking{}
-	ok = deserializeFromDb(db, GetSuperVIPStakingKey(address), superVIPStaking)
+	ok = common.DeserializeFromDb(db, GetSuperVIPStakingKey(address), superVIPStaking)
 	return
 }
 
 func SaveSuperVIPStaking(db vm_db.VmDb, address types.Address, superVIPStaking *VIPStaking) {
-	serializeToDb(db, GetSuperVIPStakingKey(address), superVIPStaking)
+	common.SerializeToDb(db, GetSuperVIPStakingKey(address), superVIPStaking)
 }
 
 func DeleteSuperVIPStaking(db vm_db.VmDb, address types.Address) {
-	setValueToDb(db, GetSuperVIPStakingKey(address), nil)
+	common.SetValueToDb(db, GetSuperVIPStakingKey(address), nil)
 }
 
 func GetSuperVIPStakingKey(address types.Address) []byte {
@@ -1832,16 +1862,16 @@ func ReduceVipStakingHash(stakings *VIPStaking, hash types.Hash) bool {
 
 func GetMiningStakings(db vm_db.VmDb, address types.Address) (miningStakings *MiningStakings, ok bool) {
 	miningStakings = &MiningStakings{}
-	ok = deserializeFromDb(db, GetMiningStakingsKey(address), miningStakings)
+	ok = common.DeserializeFromDb(db, GetMiningStakingsKey(address), miningStakings)
 	return
 }
 
 func SaveMiningStakings(db vm_db.VmDb, address types.Address, ps *MiningStakings) {
-	serializeToDb(db, GetMiningStakingsKey(address), ps)
+	common.SerializeToDb(db, GetMiningStakingsKey(address), ps)
 }
 
 func DeleteMiningStakings(db vm_db.VmDb, address types.Address) {
-	setValueToDb(db, GetMiningStakingsKey(address), nil)
+	common.SetValueToDb(db, GetMiningStakingsKey(address), nil)
 }
 
 func GetMiningStakingsKey(address types.Address) []byte {
@@ -1850,7 +1880,7 @@ func GetMiningStakingsKey(address types.Address) []byte {
 
 func GetDexMiningStakings(db vm_db.VmDb) (dexMiningStakings *MiningStakings, ok bool) {
 	dexMiningStakings = &MiningStakings{}
-	ok = deserializeFromDb(db, dexMiningStakingsKey, dexMiningStakings)
+	ok = common.DeserializeFromDb(db, dexMiningStakingsKey, dexMiningStakings)
 	return
 }
 
@@ -1900,7 +1930,9 @@ func CheckMiningStakingsCanBeDelete(miningStakings *MiningStakings) bool {
 
 func GetDelegateStakeInfo(db vm_db.VmDb, hash []byte) (info *DelegateStakeInfo, ok bool) {
 	info = &DelegateStakeInfo{}
-	ok = deserializeFromDb(db, GetDelegateStakeInfoKey(hash), info)
+	if ok = common.DeserializeFromDb(db, GetDelegateStakeInfoKey(hash), info); ok {
+		info.Id = hash
+	}
 	return
 }
 
@@ -1913,17 +1945,23 @@ func SaveDelegateStakeInfo(db vm_db.VmDb, hash types.Hash, stakeType uint8, addr
 	}
 	info.Amount = amount.Bytes()
 	info.Status = StakeSubmitted
-	serializeToDb(db, GetDelegateStakeInfoKey(hash.Bytes()), info)
+	common.SerializeToDb(db, GetDelegateStakeInfoKey(hash.Bytes()), info)
+}
+
+func SetInvestIdForDelegateStakeInfo(db vm_db.VmDb, stakeId types.Hash, investId uint64) {
+	info, _ := GetDelegateStakeInfo(db, stakeId.Bytes())
+	info.InvestId = investId
+	common.SerializeToDb(db, GetDelegateStakeInfoKey(stakeId.Bytes()), info)
 }
 
 func ConfirmDelegateStakeInfo(db vm_db.VmDb, hash types.Hash, info *DelegateStakeInfo, serialNo uint64) {
 	info.Status = int32(StakeConfirmed)
 	info.SerialNo = serialNo
-	serializeToDb(db, GetDelegateStakeInfoKey(hash.Bytes()), info)
+	common.SerializeToDb(db, GetDelegateStakeInfoKey(hash.Bytes()), info)
 }
 
 func DeleteDelegateStakeInfo(db vm_db.VmDb, hash []byte) {
-	setValueToDb(db, GetDelegateStakeInfoKey(hash), nil)
+	common.SetValueToDb(db, GetDelegateStakeInfoKey(hash), nil)
 }
 
 func GetDelegateStakeInfoKey(hash []byte) []byte {
@@ -1935,31 +1973,60 @@ func SaveDelegateStakeAddressIndex(db vm_db.VmDb, id types.Hash, stakeType int32
 	index := &DelegateStakeAddressIndex{}
 	index.StakeType = int32(stakeType)
 	index.Id = id.Bytes()
-	serializeToDb(db, GetDelegateStakeAddressIndexKey(address, serialNo), index)
+	common.SerializeToDb(db, GetDelegateStakeAddressIndexKey(address, serialNo), index)
 	return serialNo
 }
 
 func DeleteDelegateStakeAddressIndex(db vm_db.VmDb, address []byte, serialNo uint64) {
-	setValueToDb(db, GetDelegateStakeAddressIndexKey(address, serialNo), nil)
+	common.SetValueToDb(db, GetDelegateStakeAddressIndexKey(address, serialNo), nil)
 }
 
 func GetDelegateStakeAddressIndexKey(address []byte, serialNo uint64) []byte {
-	return append(append(delegateStakeAddressIndexPrefix, address...), Uint64ToBytes(serialNo)...) //4+20+8
+	return append(append(delegateStakeAddressIndexPrefix, address...), common.Uint64ToBytes(serialNo)...) //4+20+8
 }
 
 func NewDelegateStakeIndexSerialNo(db vm_db.VmDb, address []byte) (serialNo uint64) {
-	if data := getValueFromDb(db, GetDelegateStakeIndexSerialNoKey(address)); len(data) == 8 {
-		serialNo = BytesToUint64(data)
+	if data := common.GetValueFromDb(db, GetDelegateStakeIndexSerialNoKey(address)); len(data) == 8 {
+		serialNo = common.BytesToUint64(data)
 		serialNo++
 	} else {
 		serialNo = 1
 	}
-	setValueToDb(db, GetDelegateStakeIndexSerialNoKey(address), Uint64ToBytes(serialNo))
+	common.SetValueToDb(db, GetDelegateStakeIndexSerialNoKey(address), common.Uint64ToBytes(serialNo))
 	return
 }
 
 func GetDelegateStakeIndexSerialNoKey(address []byte) []byte {
 	return append(delegateStakeIndexSerialNoPrefix, address...)
+}
+
+func GetInvestStakeInfo(db vm_db.VmDb, investId uint64) (info *InvestInfo, ok bool) {
+	info = &InvestInfo{}
+	ok = common.DeserializeFromDb(db, GetInvestStakeInfoKey(investId), info)
+	return
+}
+
+func SaveInvestStakeInfo(db vm_db.VmDb, sendBlock *ledger.AccountBlock, stakeId types.Hash, param *ParamDelegateInvest) {
+	info := &InvestInfo{}
+	info.StakeId = stakeId.Bytes()
+	info.BizType = int32(param.BizType)
+	info.Amount = sendBlock.Amount.Bytes()
+	info.Status = InvestNormal
+	common.SerializeToDb(db, GetInvestStakeInfoKey(param.InvestId), info)
+}
+
+func CancellingInvestStakeInfo(db vm_db.VmDb, investId uint64) {
+	info, _ := GetInvestStakeInfo(db, investId)
+	info.Status = InvestCancelling
+	common.SerializeToDb(db, GetInvestStakeInfoKey(investId), info)
+}
+
+func DeleteInvestStakeInfo(db vm_db.VmDb, investId uint64) {
+	common.SetValueToDb(db, GetInvestStakeInfoKey(investId), nil)
+}
+
+func GetInvestStakeInfoKey(investId uint64) []byte {
+	return append(investStakeInfoPrefix, common.Uint64ToBytes(investId)...)
 }
 
 func GetTimestampInt64(db vm_db.VmDb) int64 {
@@ -1979,7 +2046,7 @@ func SetDexTimestamp(db vm_db.VmDb, timestamp int64, reader util.ConsensusReader
 		if newPeriod != oldPeriod {
 			doRollPeriod(db, newPeriod)
 		}
-		setValueToDb(db, dexTimestampKey, Uint64ToBytes(uint64(timestamp)))
+		common.SetValueToDb(db, dexTimestampKey, common.Uint64ToBytes(uint64(timestamp)))
 		return nil
 	} else {
 		return InvalidTimestampFromTimeOracleErr
@@ -1992,27 +2059,27 @@ func doRollPeriod(db vm_db.VmDb, newPeriodId uint64) {
 }
 
 func GetDexTimestamp(db vm_db.VmDb) int64 {
-	if bs := getValueFromDb(db, dexTimestampKey); len(bs) == 8 {
-		return int64(BytesToUint64(bs))
+	if bs := common.GetValueFromDb(db, dexTimestampKey); len(bs) == 8 {
+		return int64(common.BytesToUint64(bs))
 	} else {
 		return 0
 	}
 }
 
 func GetCodeByInviter(db vm_db.VmDb, address types.Address) uint32 {
-	if bs := getValueFromDb(db, append(codeByInviterKeyPrefix, address.Bytes()...)); len(bs) == 4 {
-		return BytesToUint32(bs)
+	if bs := common.GetValueFromDb(db, append(codeByInviterKeyPrefix, address.Bytes()...)); len(bs) == 4 {
+		return common.BytesToUint32(bs)
 	} else {
 		return 0
 	}
 }
 
 func SaveCodeByInviter(db vm_db.VmDb, address types.Address, inviteCode uint32) {
-	setValueToDb(db, append(codeByInviterKeyPrefix, address.Bytes()...), Uint32ToBytes(inviteCode))
+	common.SetValueToDb(db, append(codeByInviterKeyPrefix, address.Bytes()...), common.Uint32ToBytes(inviteCode))
 }
 
 func GetInviterByCode(db vm_db.VmDb, inviteCode uint32) (*types.Address, error) {
-	if bs := getValueFromDb(db, append(inviterByCodeKeyPrefix, Uint32ToBytes(inviteCode)...)); len(bs) == types.AddressSize {
+	if bs := common.GetValueFromDb(db, append(inviterByCodeKeyPrefix, common.Uint32ToBytes(inviteCode)...)); len(bs) == types.AddressSize {
 		if inviter, err := types.BytesToAddress(bs); err != nil {
 			return nil, err
 		} else {
@@ -2024,15 +2091,15 @@ func GetInviterByCode(db vm_db.VmDb, inviteCode uint32) (*types.Address, error) 
 }
 
 func SaveInviterByCode(db vm_db.VmDb, address types.Address, inviteCode uint32) {
-	setValueToDb(db, append(inviterByCodeKeyPrefix, Uint32ToBytes(inviteCode)...), address.Bytes())
+	common.SetValueToDb(db, append(inviterByCodeKeyPrefix, common.Uint32ToBytes(inviteCode)...), address.Bytes())
 }
 
 func SaveInviterByInvitee(db vm_db.VmDb, invitee, inviter types.Address) {
-	setValueToDb(db, append(inviterByInviteeKeyPrefix, invitee.Bytes()...), inviter.Bytes())
+	common.SetValueToDb(db, append(inviterByInviteeKeyPrefix, invitee.Bytes()...), inviter.Bytes())
 }
 
 func GetInviterByInvitee(db vm_db.VmDb, invitee types.Address) (*types.Address, error) {
-	if bs := getValueFromDb(db, append(inviterByInviteeKeyPrefix, invitee.Bytes()...)); len(bs) == types.AddressSize {
+	if bs := common.GetValueFromDb(db, append(inviterByInviteeKeyPrefix, invitee.Bytes()...)); len(bs) == types.AddressSize {
 		if inviter, err := types.BytesToAddress(bs); err != nil {
 			return nil, err
 		} else {
@@ -2054,7 +2121,7 @@ func NewInviteCode(db vm_db.VmDb, hash types.Hash) uint32 {
 		if codeBytes, ok = randomBytesFromBytes(hash.Bytes(), codeBytes, 0, 32); !ok {
 			return 0
 		}
-		if inviteCode = BytesToUint32(codeBytes); inviteCode == 0 {
+		if inviteCode = common.BytesToUint32(codeBytes); inviteCode == 0 {
 			continue
 		}
 		if _, err = GetInviterByCode(db, inviteCode); err == InvalidInviteCodeErr {
@@ -2065,15 +2132,15 @@ func NewInviteCode(db vm_db.VmDb, hash types.Hash) uint32 {
 }
 
 func StartNormalMine(db vm_db.VmDb) {
-	setValueToDb(db, normalMineStartedKey, []byte{1})
+	common.SetValueToDb(db, normalMineStartedKey, []byte{1})
 }
 
 func IsNormalMiningStarted(db vm_db.VmDb) bool {
-	return len(getValueFromDb(db, normalMineStartedKey)) > 0
+	return len(common.GetValueFromDb(db, normalMineStartedKey)) > 0
 }
 
 func GetVxMinePool(db vm_db.VmDb) *big.Int {
-	if data := getValueFromDb(db, vxMinePoolKey); len(data) > 0 {
+	if data := common.GetValueFromDb(db, vxMinePoolKey); len(data) > 0 {
 		return new(big.Int).SetBytes(data)
 	} else {
 		return new(big.Int)
@@ -2081,11 +2148,11 @@ func GetVxMinePool(db vm_db.VmDb) *big.Int {
 }
 
 func SaveVxMinePool(db vm_db.VmDb, amount *big.Int) {
-	setValueToDb(db, vxMinePoolKey, amount.Bytes())
+	common.SetValueToDb(db, vxMinePoolKey, amount.Bytes())
 }
 
 func GetVxBurnAmount(db vm_db.VmDb) *big.Int {
-	if data := getValueFromDb(db, vxBurnAmountKey); len(data) > 0 {
+	if data := common.GetValueFromDb(db, vxBurnAmountKey); len(data) > 0 {
 		return new(big.Int).SetBytes(data)
 	} else {
 		return new(big.Int)
@@ -2093,7 +2160,7 @@ func GetVxBurnAmount(db vm_db.VmDb) *big.Int {
 }
 
 func SaveVxBurnAmount(db vm_db.VmDb, amount *big.Int) {
-	setValueToDb(db, vxBurnAmountKey, amount.Bytes())
+	common.SetValueToDb(db, vxBurnAmountKey, amount.Bytes())
 }
 
 func GrantMarketToAgent(db vm_db.VmDb, principal, agent types.Address, marketId int32) {
@@ -2102,7 +2169,7 @@ func GrantMarketToAgent(db vm_db.VmDb, principal, agent types.Address, marketId 
 		data  []byte
 		found bool
 	)
-	if data = getValueFromDb(db, key); len(data) >= types.AddressSize {
+	if data = common.GetValueFromDb(db, key); len(data) >= types.AddressSize {
 		dataLen := len(data)
 		if dataLen%types.AddressSize != 0 {
 			panic(InternalErr)
@@ -2116,7 +2183,7 @@ func GrantMarketToAgent(db vm_db.VmDb, principal, agent types.Address, marketId 
 	}
 	if !found {
 		data = append(data, agent.Bytes()...)
-		setValueToDb(db, key, data)
+		common.SetValueToDb(db, key, data)
 	}
 }
 
@@ -2125,7 +2192,7 @@ func RevokeMarketFromAgent(db vm_db.VmDb, principal, agent types.Address, market
 		key  = GetGrantedMarketToAgentKey(principal, marketId)
 		data []byte
 	)
-	if data = getValueFromDb(db, key); len(data) >= types.AddressSize {
+	if data = common.GetValueFromDb(db, key); len(data) >= types.AddressSize {
 		dataLen := len(data)
 		if dataLen%types.AddressSize != 0 {
 			panic(InternalErr)
@@ -2139,12 +2206,12 @@ func RevokeMarketFromAgent(db vm_db.VmDb, principal, agent types.Address, market
 				break
 			}
 		}
-		setValueToDb(db, key, data)
+		common.SetValueToDb(db, key, data)
 	}
 }
 
 func IsMarketGrantedToAgent(db vm_db.VmDb, principal, agent types.Address, marketId int32) bool {
-	if data := getValueFromDb(db, GetGrantedMarketToAgentKey(principal, marketId)); len(data) >= types.AddressSize {
+	if data := common.GetValueFromDb(db, GetGrantedMarketToAgentKey(principal, marketId)); len(data) >= types.AddressSize {
 		if len(data)%types.AddressSize != 0 {
 			panic(InternalErr)
 		}
@@ -2161,13 +2228,13 @@ func GetGrantedMarketToAgentKey(principal types.Address, marketId int32) []byte 
 	re := make([]byte, len(grantedMarketToAgentKeyPrefix)+types.AddressSize+3)
 	copy(re[:], grantedMarketToAgentKeyPrefix)
 	copy(re[len(grantedMarketToAgentKeyPrefix):], principal.Bytes())
-	copy(re[len(grantedMarketToAgentKeyPrefix)+types.AddressSize:], Uint32ToBytes(uint32(marketId))[1:])
+	copy(re[len(grantedMarketToAgentKeyPrefix)+types.AddressSize:], common.Uint32ToBytes(uint32(marketId))[1:])
 	return re
 }
 
 func GetVxUnlocks(db vm_db.VmDb, address types.Address) (unlocks *VxUnlocks, ok bool) {
 	unlocks = &VxUnlocks{}
-	ok = deserializeFromDb(db, GetVxUnlocksKey(address), unlocks)
+	ok = common.DeserializeFromDb(db, GetVxUnlocksKey(address), unlocks)
 	return
 }
 
@@ -2175,10 +2242,10 @@ func AddVxUnlock(db vm_db.VmDb, reader util.ConsensusReader, address types.Addre
 	unlocks := &VxUnlocks{}
 	currentPeriodId := GetCurrentPeriodId(db, reader)
 	var updated bool
-	if ok := deserializeFromDb(db, GetVxUnlocksKey(address), unlocks); ok {
+	if ok := common.DeserializeFromDb(db, GetVxUnlocksKey(address), unlocks); ok {
 		size := len(unlocks.Unlocks)
 		if unlocks.Unlocks[size-1].PeriodId == currentPeriodId {
-			unlocks.Unlocks[size-1].Amount = AddBigInt(unlocks.Unlocks[size-1].Amount, amount.Bytes())
+			unlocks.Unlocks[size-1].Amount = common.AddBigInt(unlocks.Unlocks[size-1].Amount, amount.Bytes())
 			updated = true
 		}
 	}
@@ -2188,14 +2255,14 @@ func AddVxUnlock(db vm_db.VmDb, reader util.ConsensusReader, address types.Addre
 		newUnlock.PeriodId = currentPeriodId
 		unlocks.Unlocks = append(unlocks.Unlocks, newUnlock)
 	}
-	serializeToDb(db, GetVxUnlocksKey(address), unlocks)
+	common.SerializeToDb(db, GetVxUnlocksKey(address), unlocks)
 }
 
 func UpdateVxUnlocks(db vm_db.VmDb, address types.Address, unlocks *VxUnlocks) {
 	if len(unlocks.Unlocks) == 0 {
-		setValueToDb(db, GetVxUnlocksKey(address), nil)
+		common.SetValueToDb(db, GetVxUnlocksKey(address), nil)
 	} else {
-		serializeToDb(db, GetVxUnlocksKey(address), unlocks)
+		common.SerializeToDb(db, GetVxUnlocksKey(address), unlocks)
 	}
 }
 
@@ -2209,20 +2276,30 @@ func GetCancelStakes(db vm_db.VmDb, address types.Address) (cancelStakes *Cancel
 	return
 }
 
-func AddCancelStake(db vm_db.VmDb, reader util.ConsensusReader, address types.Address, amount *big.Int) {
+func AddCancelStake(db vm_db.VmDb, reader util.ConsensusReader, address types.Address, amount *big.Int, investId uint64) {
 	cancelStakes := &CancelStakes{}
 	currentPeriodId := GetCurrentPeriodId(db, reader)
 	var updated bool
 	if ok := deserializeFromDb(db, GetCancelStakesKey(address), cancelStakes); ok {
 		size := len(cancelStakes.Cancels)
 		if cancelStakes.Cancels[size-1].PeriodId == currentPeriodId {
-			cancelStakes.Cancels[size-1].Amount = AddBigInt(cancelStakes.Cancels[size-1].Amount, amount.Bytes())
+			if investId == 0 {
+				cancelStakes.Cancels[size-1].Amount = common.AddBigInt(cancelStakes.Cancels[size-1].Amount, amount.Bytes())
+			} else {
+				cancelStakes.Cancels[size-1].InvestedAmount = common.AddBigInt(cancelStakes.Cancels[size-1].InvestedAmount, amount.Bytes())
+				cancelStakes.Cancels[size-1].InvestIds = append(cancelStakes.Cancels[size-1].InvestIds, investId)
+			}
 			updated = true
 		}
 	}
 	if !updated {
 		newCancel := &dexproto.CancelStake{}
-		newCancel.Amount = amount.Bytes()
+		if investId == 0 {
+			newCancel.Amount = amount.Bytes()
+		} else {
+			newCancel.InvestedAmount = amount.Bytes()
+			newCancel.InvestIds = append(newCancel.InvestIds, investId)
+		}
 		newCancel.PeriodId = currentPeriodId
 		cancelStakes.Cancels = append(cancelStakes.Cancels, newCancel)
 	}
@@ -2231,7 +2308,7 @@ func AddCancelStake(db vm_db.VmDb, reader util.ConsensusReader, address types.Ad
 
 func UpdateCancelStakes(db vm_db.VmDb, address types.Address, cancelStakes *CancelStakes) {
 	if len(cancelStakes.Cancels) == 0 {
-		setValueToDb(db, GetCancelStakesKey(address), nil)
+		common.SetValueToDb(db, GetCancelStakesKey(address), nil)
 	} else {
 		serializeToDb(db, GetCancelStakesKey(address), cancelStakes)
 	}
@@ -2241,8 +2318,8 @@ func GetCancelStakesKey(address types.Address) []byte {
 	return append(cancelStakesKeyPrefix, address.Bytes()...)
 }
 
-func deserializeFromDb(db vm_db.VmDb, key []byte, serializable SerializableDex) bool {
-	if data := getValueFromDb(db, key); len(data) > 0 {
+func deserializeFromDb(db vm_db.VmDb, key []byte, serializable common.Serializable) bool {
+	if data := common.GetValueFromDb(db, key); len(data) > 0 {
 		if err := serializable.DeSerialize(data); err != nil {
 			panic(err)
 		}
@@ -2252,10 +2329,10 @@ func deserializeFromDb(db vm_db.VmDb, key []byte, serializable SerializableDex) 
 	}
 }
 
-func serializeToDb(db vm_db.VmDb, key []byte, serializable SerializableDex) {
+func serializeToDb(db vm_db.VmDb, key []byte, serializable common.Serializable) {
 	if data, err := serializable.Serialize(); err != nil {
 		panic(err)
 	} else {
-		setValueToDb(db, key, data)
+		common.SetValueToDb(db, key, data)
 	}
 }

@@ -7,18 +7,20 @@ import (
 	"github.com/vitelabs/go-vite/interfaces"
 	"github.com/vitelabs/go-vite/ledger"
 	"github.com/vitelabs/go-vite/vm/contracts/abi"
+	"github.com/vitelabs/go-vite/vm/contracts/common"
 	dexproto "github.com/vitelabs/go-vite/vm/contracts/dex/proto"
 	"github.com/vitelabs/go-vite/vm/util"
 	"github.com/vitelabs/go-vite/vm_db"
 	"math/big"
 )
 
-func HandleStakeAction(db vm_db.VmDb, stakeType, actionType uint8, address, principal types.Address, amount *big.Int, stakeHeight uint64, block *ledger.AccountBlock) ([]*ledger.AccountBlock, error) {
+func HandleStakeAction(db vm_db.VmDb, stakeType, actionType uint8, address, principal types.Address, amount *big.Int, stakeHeight uint64, block *ledger.AccountBlock) (blocks []*ledger.AccountBlock, stakeId types.Hash, err error) {
+	var methodData []byte
 	if actionType == Stake { // handle v1 + v2 stake
-		if methodData, err := stakeRequest(db, address, principal, stakeType, amount, stakeHeight); err != nil {
-			return []*ledger.AccountBlock{}, err
+		if methodData, err = stakeRequest(db, address, principal, stakeType, amount, stakeHeight); err != nil {
+			return
 		} else {
-			blocks := []*ledger.AccountBlock{
+			blocks = []*ledger.AccountBlock{
 				{
 					AccountAddress: types.AddressDexFund,
 					ToAddress:      types.AddressQuota,
@@ -28,14 +30,16 @@ func HandleStakeAction(db vm_db.VmDb, stakeType, actionType uint8, address, prin
 					Data:           methodData,
 				},
 			}
+
 			if IsEarthFork(db) {
-				stakeId := util.ComputeSendBlockHash(block, blocks[0], 0)
+				stakeId = util.ComputeSendBlockHash(block, blocks[0], 0)
 				SaveDelegateStakeInfo(db, stakeId, stakeType, address, principal, amount)
 			}
-			return blocks, nil
+			return blocks, stakeId, nil
 		}
 	} else { //only handle v1 cancel stake
-		return DoCancelStakeV1(db, address, stakeType, amount)
+		blocks, err = DoCancelStakeV1(db, address, stakeType, amount)
+		return
 	}
 }
 
@@ -93,6 +97,28 @@ func DoRawCancelStakeV2(id types.Hash) ([]*ledger.AccountBlock, error) {
 		return []*ledger.AccountBlock{}, err
 	} else {
 		return composeCancelBlock(methodData), nil
+	}
+}
+
+func DoRefundInvest(db vm_db.VmDb, investIds []byte, refundReason uint8, amount *big.Int) ([]*ledger.AccountBlock, error) {
+	for i := 0; i < len(investIds)/8; i++ {
+		iv := investIds[i*8 : (i+1)*8]
+		DeleteInvestStakeInfo(db, common.BytesToUint64(iv))
+	}
+	if methodData, err := abi.ABIDeFi.PackMethod(abi.MethodNameDeFiRefundInvest, investIds, refundReason); err != nil {
+		return nil, err
+	} else {
+		blocks := []*ledger.AccountBlock{
+			{
+				AccountAddress: types.AddressDexFund,
+				ToAddress:      types.AddressDeFi,
+				BlockType:      ledger.BlockTypeSendCall,
+				Amount:         amount,
+				TokenId:        ledger.ViteTokenId,
+				Data:           methodData,
+			},
+		}
+		return blocks, nil
 	}
 }
 
@@ -169,13 +195,13 @@ func OnMiningStakeSuccessV2(db vm_db.VmDb, reader util.ConsensusReader, address 
 
 func OnCancelMiningStakeSuccess(db vm_db.VmDb, reader util.ConsensusReader, address types.Address, amount, updatedAmount *big.Int) error {
 	if IsEarthFork(db) {
-		AddCancelStake(db, reader, address, amount)
+		AddCancelStake(db, reader, address, amount, 0)
 	}
 	return doChangeMiningStakedAmount(db, reader, address, new(big.Int).Neg(amount), new(big.Int).Add(updatedAmount, GetMiningStakedV2Amount(db, address)))
 }
 
-func OnCancelMiningStakeSuccessV2(db vm_db.VmDb, reader util.ConsensusReader, address types.Address, amount, updatedAmountV2 *big.Int) error {
-	AddCancelStake(db, reader, address, amount)
+func OnCancelMiningStakeSuccessV2(db vm_db.VmDb, reader util.ConsensusReader, address types.Address, amount, updatedAmountV2 *big.Int, investId uint64) error {
+	AddCancelStake(db, reader, address, amount, investId)
 	return doChangeMiningStakedAmount(db, reader, address, new(big.Int).Neg(amount), new(big.Int).Add(GetMiningStakedAmount(db, address), updatedAmountV2))
 }
 
@@ -207,7 +233,7 @@ func doChangeMiningStakedAmount(db vm_db.VmDb, reader util.ConsensusReader, addr
 			miningStakings.Stakings[originStakingsLen-1].Amount = updatedAmount.Bytes()
 		} else {
 			if IsValidMiningStakeAmountBytes(miningStakings.Stakings[originStakingsLen-1].Amount) {
-				sumChange = NegativeAmount(miningStakings.Stakings[originStakingsLen-1].Amount)
+				sumChange = common.NegativeAmount(miningStakings.Stakings[originStakingsLen-1].Amount)
 			}
 			if originStakingsLen > 1 { // in case originStakingsLen > 1, update last period to diff the condition of current period not changed ever from last saved period
 				miningStakings.Stakings[originStakingsLen-1].Amount = updatedAmount.Bytes()
@@ -228,7 +254,7 @@ func doChangeMiningStakedAmount(db vm_db.VmDb, reader util.ConsensusReader, addr
 			needUpdate = true
 		} else {
 			if IsValidMiningStakeAmountBytes(miningStakings.Stakings[originStakingsLen-1].Amount) {
-				sumChange = NegativeAmount(miningStakings.Stakings[originStakingsLen-1].Amount)
+				sumChange = common.NegativeAmount(miningStakings.Stakings[originStakingsLen-1].Amount)
 				miningStakingByPeriod := &dexproto.MiningStakingByPeriod{Period: periodId, Amount: updatedAmount.Bytes()}
 				miningStakings.Stakings = append(miningStakings.Stakings, miningStakingByPeriod)
 				needUpdate = true
@@ -286,7 +312,7 @@ func GetStakeInfoList(db vm_db.VmDb, stakeAddr types.Address, filter func(*Deleg
 			break
 		}
 		stakeIndex := &DelegateStakeAddressIndex{}
-		if ok := deserializeFromDb(db, iterator.Key(), stakeIndex); ok {
+		if ok := common.DeserializeFromDb(db, iterator.Key(), stakeIndex); ok {
 			if filter(stakeIndex) {
 				if info, ok := GetDelegateStakeInfo(db, stakeIndex.Id); ok {
 					info.Id = stakeIndex.Id

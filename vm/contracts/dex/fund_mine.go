@@ -5,6 +5,7 @@ import (
 	"github.com/vitelabs/go-vite/ledger"
 	"github.com/vitelabs/go-vite/log15"
 	"github.com/vitelabs/go-vite/vm/contracts/abi"
+	"github.com/vitelabs/go-vite/vm/contracts/common"
 	"github.com/vitelabs/go-vite/vm/util"
 	"github.com/vitelabs/go-vite/vm_db"
 	"math/big"
@@ -28,7 +29,7 @@ func DoMineVxForFee(db vm_db.VmDb, reader util.ConsensusReader, periodId uint64,
 		return AccumulateAmountFromMap(amtForMarkets), nil
 	}
 	for _, feeForMine := range dexFeesByPeriod.FeesForMine {
-		feeSumMap[feeForMine.QuoteTokenType] = new(big.Int).SetBytes(AddBigInt(feeForMine.BaseAmount, feeForMine.InviteBonusAmount))
+		feeSumMap[feeForMine.QuoteTokenType] = new(big.Int).SetBytes(common.AddBigInt(feeForMine.BaseAmount, feeForMine.InviteBonusAmount))
 		dividedFeeMap[feeForMine.QuoteTokenType] = big.NewInt(0)
 	}
 	for i := ViteTokenType; i <= UsdTokenType; i++ {
@@ -272,9 +273,9 @@ func GetVxAmountsForEqualItems(db vm_db.VmDb, periodId uint64, vxPool *big.Int, 
 	if vxPool.Sign() > 0 {
 		success = true
 		toDivideTotal := GetVxToMineByPeriodId(db, periodId)
-		toDivideTotalF := new(big.Float).SetPrec(bigFloatPrec).SetInt(toDivideTotal)
-		proportion, _ := new(big.Float).SetPrec(bigFloatPrec).SetString(rateSum)
-		amountSum := RoundAmount(new(big.Float).SetPrec(bigFloatPrec).Mul(toDivideTotalF, proportion))
+		toDivideTotalF := new(big.Float).SetPrec(common.BigFloatPrec).SetInt(toDivideTotal)
+		proportion, _ := new(big.Float).SetPrec(common.BigFloatPrec).SetString(rateSum)
+		amountSum := common.RoundAmount(new(big.Float).SetPrec(common.BigFloatPrec).Mul(toDivideTotalF, proportion))
 		var notEnough bool
 		if amountSum.Cmp(vxPool) > 0 {
 			amountSum.Set(vxPool)
@@ -303,9 +304,9 @@ func GetVxAmountToMine(db vm_db.VmDb, periodId uint64, vxPool *big.Int, rate str
 	if vxPool.Sign() > 0 {
 		success = true
 		toDivideTotal := GetVxToMineByPeriodId(db, periodId)
-		toDivideTotalF := new(big.Float).SetPrec(bigFloatPrec).SetInt(toDivideTotal)
-		proportion, _ := new(big.Float).SetPrec(bigFloatPrec).SetString(rate)
-		amount = RoundAmount(new(big.Float).SetPrec(bigFloatPrec).Mul(toDivideTotalF, proportion))
+		toDivideTotalF := new(big.Float).SetPrec(common.BigFloatPrec).SetInt(toDivideTotal)
+		proportion, _ := new(big.Float).SetPrec(common.BigFloatPrec).SetString(rate)
+		amount = common.RoundAmount(new(big.Float).SetPrec(common.BigFloatPrec).Mul(toDivideTotalF, proportion))
 		if amount.Cmp(vxPool) > 0 {
 			amount.Set(vxPool)
 		}

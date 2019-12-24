@@ -203,6 +203,13 @@ func GetApi(vite *vite.Vite, apiModule string) rpc.API {
 			Service:   api.NewDataApi(vite),
 			Public:    true,
 		}
+	case "defi":
+		return rpc.API{
+			Namespace: "defi",
+			Version:   "1.0",
+			Service:   api.NewDeFiApi(vite),
+			Public:    true,
+		}
 	case "ledgerdebug":
 		return rpc.API{
 			Namespace: "ledgerdebug",
