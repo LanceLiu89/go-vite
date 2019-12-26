@@ -236,6 +236,7 @@ func newDeFiContracts() map[types.Address]*builtinContract {
 			cabi.MethodNameDeFiRegisterSBP:                 &MethodDeFiRegisterSBP{cabi.MethodNameDeFiRegisterSBP},
 			cabi.MethodNameDeFiUpdateSBPRegistration:       &MethodDeFiUpdateSBPRegistration{cabi.MethodNameDeFiUpdateSBPRegistration},
 			defaultMethodName:                              &MethodDeFiDefault{defaultMethodName},
+			cabi.MethodNameDeFiAdminConfig:                 &MethodDeFiAdminConfig{cabi.MethodNameDeFiAdminConfig},
 			cabi.MethodNameDeFiTriggerJob:                  &MethodDeFiTriggerJob{cabi.MethodNameDeFiTriggerJob},
 			cabi.MethodNameDeFiNotifyTime:                  &MethodDeFiNotifyTime{cabi.MethodNameDeFiNotifyTime},
 		}, cabi.ABIDeFi,

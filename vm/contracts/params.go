@@ -63,7 +63,7 @@ var (
 		StakeHeight:              3600 * 24 * 3,
 		DexVipStakeHeight:        3600 * 24 * 30,
 		DexSuperVipStakeHeight:   3600 * 24 * 30,
-		SBPStakeHeight:           7776100,
+		SBPStakeHeight:           7776000,
 		DeFiInvestConfirmSeconds: 100,
 		DeFiDayHeight:            3600 * 24,
 	}

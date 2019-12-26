@@ -45,6 +45,15 @@ func SetValueToDb(db vm_db.VmDb, key, value []byte) {
 	}
 }
 
+func GetAddressFromKey(db vm_db.VmDb, key []byte) *types.Address {
+	if addressBytes := GetValueFromDb(db, key); len(addressBytes) == types.AddressSize {
+		address, _ := types.BytesToAddress(addressBytes)
+		return &address
+	} else {
+		return nil
+	}
+}
+
 type Event interface {
 	GetTopicId() types.Hash
 	ToDataBytes() []byte

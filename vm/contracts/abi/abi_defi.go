@@ -20,6 +20,7 @@ const (
 		{"type":"function","name":"RefundInvest", "inputs":[{"name":"InvestHashes","type":"bytes"},{"name":"reason","type":"uint8"}]},
 		{"type":"function","name":"StakeForQuotaWithCallbackCallback", "inputs":[{"name":"id","type":"bytes32"},{"name":"success","type":"bool"}]},
 		{"type":"function","name":"CancelQuotaStakingWithCallbackCallback", "inputs":[{"name":"id","type":"bytes32"},{"name":"success","type":"bool"}]},
+		{"type":"function","name":"DeFiAdminConfig", "inputs":[{"name":"operationCode","type":"uint8"},{"name":"owner","type":"address"},{"name":"timeOracle","type":"address"},{"name":"jobTrigger","type":"address"},{"name":"operator","type":"address"}]},
 		{"type":"function","name":"TriggerJob", "inputs":[{"name":"bizType","type":"uint8"},{"name":"data","type":"bytes"}]},
 		{"type":"function","name":"NotifyTime", "inputs":[{"name":"timestamp","type":"int64"}]}
 
@@ -37,6 +38,7 @@ const (
 	MethodNameDeFiRefundInvest                = "RefundInvest"
 	MethodNameDeFiDelegateStakeCallback       = "StakeForQuotaWithCallbackCallback"
 	MethodNameDeFiCancelDelegateStakeCallback = "CancelQuotaStakingWithCallbackCallback"
+	MethodNameDeFiAdminConfig                 = "DeFiAdminConfig"
 	MethodNameDeFiTriggerJob                  = "TriggerJob"
 	MethodNameDeFiNotifyTime                  = "NotifyTime"
 )

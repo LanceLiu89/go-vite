@@ -44,9 +44,11 @@ message Loan {
     bytes Invested = 13;
     // 1 open, 2 success, 3 failed, 4 expired, 5 fail refunded, 6 expire refunded
     int32 Status = 14;
-    int64 Created = 15;
-    int64 StartTime = 16;
-    int64 Updated = 17;
+    bytes SettledInterest = 15;
+    int32 SettledDays = 16;
+    int64 Created = 17;
+    int64 StartTime = 18;
+    int64 Updated = 19;
 }
 
 //storage+event
@@ -108,7 +110,9 @@ message LoanUpdate {
     int32 Status = 4;
     uint64 ExpireHeight = 5;
     uint64 StartHeight = 6;
-    int64 Timestamp = 7;
+    bytes SettledInterest = 7;
+    int32 SettledDays = 8;
+    int64 Timestamp = 9;
 }
 
 //event

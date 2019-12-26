@@ -23,9 +23,17 @@ type RpcLoan struct {
 	ExpireHeight     uint64 `json:"expireHeight,omitempty"`
 	Invested         string `json:"invested,omitempty"`
 	Status           int32  `json:"status,omitempty"`
+	SettledInterest  string `json:"settledInterest,omitempty"`
+	SettledDays      int32  `json:"settledDays,omitempty"`
 	Created          int64  `json:"created"`
 	StartTime        int64  `json:"startTime,omitempty"`
 	Updated          int64  `json:"updated,omitempty"`
+}
+
+type RpcLoanPage struct {
+	Loans      []*RpcLoan `json:"loans"`
+	LastLoanId uint64     `json:"lastLoanId"`
+	Count      int        `json:"count"`
 }
 
 func LoanToRpc(loan *defi.Loan) *RpcLoan {
@@ -49,6 +57,8 @@ func LoanToRpc(loan *defi.Loan) *RpcLoan {
 			ExpireHeight:     loan.ExpireHeight,
 			Invested:         dex.AmountBytesToString(loan.Invested),
 			Status:           loan.Status,
+			SettledInterest:  dex.AmountBytesToString(loan.SettledInterest),
+			SettledDays:      loan.SettledDays,
 			Created:          loan.Created,
 			StartTime:        loan.StartTime,
 			Updated:          loan.Updated,
@@ -68,6 +78,12 @@ type RpcSubscription struct {
 	Status      int32  `json:"status,omitempty"`
 	Created     int64  `json:"created"`
 	Updated     int64  `json:"updated,omitempty"`
+}
+
+type RpcSubscriptionPage struct {
+	Subscriptions []*RpcSubscription `json:"subscriptions"`
+	LastSubKey    string             `json:"lastSubKey"`
+	Count         int                `json:"count"`
 }
 
 func SubscriptionToRpc(sub *defi.Subscription) *RpcSubscription {
@@ -105,6 +121,12 @@ type RpcInvest struct {
 	InvestHash   string `json:"investHash"`
 	Created      int64  `json:"created"`
 	Updated      int64  `json:"updated,omitempty"`
+}
+
+type RpcInvestPage struct {
+	Invests      []*RpcInvest `json:"invests"`
+	LastInvestId uint64       `json:"lastInvestId"`
+	Count        int          `json:"count"`
 }
 
 func InvestToRpc(invest *defi.Invest) *RpcInvest {

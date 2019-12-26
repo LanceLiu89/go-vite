@@ -1,6 +1,7 @@
 package defi
 
 import (
+	"fmt"
 	"github.com/vitelabs/go-vite/common/types"
 	"github.com/vitelabs/go-vite/interfaces"
 	"github.com/vitelabs/go-vite/ledger"
@@ -45,7 +46,7 @@ func PrepareInvest(db vm_db.VmDb, address types.Address, bizType uint8, loanAvai
 		if totalAvailable.Cmp(dex.StakeForMiningMinAmount) < 0 {
 			err = ExceedFundAvailableErr
 			return
-		} else if availableHeight < stakeHeightMin + uint64(dex.SchedulePeriods)*deFiDayHeight {
+		} else if availableHeight < stakeHeightMin+uint64(dex.SchedulePeriods)*deFiDayHeight {
 			err = AvailableHeightNotValidForInvestErr
 			return
 		}
@@ -316,9 +317,9 @@ func HandleGovernanceFeedback(db vm_db.VmDb, block *ledger.AccountBlock) (blocks
 		param    = new(abi.ParamRegister)
 		sbpName  = new(string)
 	)
-	if err = abi.ABIGovernance.UnpackMethod(param, abi.MethodNameRegisterV3, block.Data); err == nil && block.Amount.Sign() > 0 {//governance.RegisterSBP failed
+	if err = abi.ABIGovernance.UnpackMethod(param, abi.MethodNameRegisterV3, block.Data); err == nil && block.Amount.Sign() > 0 { //governance.RegisterSBP failed
 		*sbpName = param.SbpName
-	} else if err = abi.ABIGovernance.UnpackMethod(sbpName, abi.MethodNameRevokeV3, block.Data); err == nil {//governance.RevokeSBP success
+	} else if err = abi.ABIGovernance.UnpackMethod(sbpName, abi.MethodNameRevokeV3, block.Data); err == nil { //governance.RevokeSBP success
 		isRevoke = true
 	} else {
 		err = InvalidInputParamErr
@@ -371,7 +372,46 @@ func GetLoanInvests(db vm_db.VmDb, loanId uint64) (invests []*Invest, err error)
 	return
 }
 
-func traverseLoanInvests(db vm_db.VmDb, loanId uint64, traverseFunc func(investId uint64) error) error {
+func GetInvestList(db vm_db.VmDb, investId uint64, count int) (infos []*Invest, newLastInvestId uint64, err error) {
+	var iterator interfaces.StorageIterator
+	if iterator, err = db.NewStorageIterator(investKeyPrefix); err != nil {
+		return
+	}
+	defer iterator.Release()
+
+	if investId > 0 {
+		ok := iterator.Seek(getInvestKey(investId))
+		if !ok {
+			err = fmt.Errorf("last investId not valid for page invest list")
+			return
+		}
+	}
+	infos = make([]*Invest, 0, count)
+	for {
+		if !iterator.Next() {
+			if err = iterator.Error(); err != nil {
+				return
+			}
+			break
+		}
+		data := iterator.Value()
+		if len(data) > 0 {
+			invest := &Invest{}
+			if err = invest.DeSerialize(data); err != nil {
+				return
+			} else {
+				infos = append(infos, invest)
+				newLastInvestId = common.BytesToUint64(iterator.Key()[len(investKeyPrefix):])
+				if len(infos) == count {
+					return
+				}
+			}
+		}
+	}
+	return
+}
+
+func traverseLoanInvests(db vm_db.VmDb, loanId uint64, handler func(investId uint64) error) error {
 	iterator, err := db.NewStorageIterator(append(investToLoanIndexKeyPrefix, common.Uint64ToBytes(loanId)...))
 	if err != nil {
 		panic(err)
@@ -385,7 +425,7 @@ func traverseLoanInvests(db vm_db.VmDb, loanId uint64, traverseFunc func(investI
 			break
 		}
 		investId := common.BytesToUint64(iterator.Key()[len(investToLoanIndexKeyPrefix)+8:])
-		if err = traverseFunc(investId); err != nil {
+		if err = handler(investId); err != nil {
 			return err
 		}
 	}

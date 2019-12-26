@@ -91,12 +91,19 @@ func OnAccLoanFailed(db vm_db.VmDb, address types.Address, interest []byte) (*de
 func OnAccLoanSuccess(db vm_db.VmDb, address []byte, loan *Loan) (*defiproto.Account, error) {
 	addr, _ := types.BytesToAddress(address)
 	return updateFund(db, addr, ledger.ViteTokenId.Bytes(), func(acc *defiproto.Account) (*defiproto.Account, error) {
-		if common.CmpForBigInt(acc.BaseAccount.Locked, loan.Interest) < 0 {
+		acc.LoanAccount.Available = common.AddBigInt(acc.LoanAccount.Available, CalculateAmount(loan.Shares, loan.ShareAmount).Bytes())
+		return acc, nil
+	})
+}
+
+func OnAccLoanSettleInterest(db vm_db.VmDb, address []byte, interest []byte) (*defiproto.Account, error) {
+	addr, _ := types.BytesToAddress(address)
+	return updateFund(db, addr, ledger.ViteTokenId.Bytes(), func(acc *defiproto.Account) (*defiproto.Account, error) {
+		if common.CmpForBigInt(acc.BaseAccount.Locked, interest) < 0 {
 			return nil, ExceedFundAvailableErr
 		} else {
-			acc.BaseAccount.Locked = common.SubBigInt(acc.BaseAccount.Locked, loan.Interest).Bytes()
+			acc.BaseAccount.Locked = common.SubBigInt(acc.BaseAccount.Locked, interest).Bytes()
 		}
-		acc.LoanAccount.Available = common.AddBigInt(acc.LoanAccount.Available, CalculateAmount(loan.Shares, loan.ShareAmount).Bytes())
 		return acc, nil
 	})
 }
@@ -126,17 +133,24 @@ func OnAccSubscribe(db vm_db.VmDb, address types.Address, amount *big.Int) (*def
 	})
 }
 
-func OnAccSubscribeSuccess(db vm_db.VmDb, address []byte, interest, amount *big.Int) (*defiproto.Account, error) {
+func OnAccSubscribeSuccess(db vm_db.VmDb, address []byte, amount *big.Int) (*defiproto.Account, error) {
 	addr, _ := types.BytesToAddress(address)
 	return updateFund(db, addr, ledger.ViteTokenId.Bytes(), func(acc *defiproto.Account) (*defiproto.Account, error) {
 		subscribing := new(big.Int).SetBytes(acc.BaseAccount.Subscribing)
 		if subscribing.Cmp(amount) < 0 {
 			return nil, ExceedFundAvailableErr
 		} else {
-			acc.BaseAccount.Available = common.AddBigInt(acc.BaseAccount.Available, interest.Bytes())
 			acc.BaseAccount.Subscribing = common.SubBigIntAbs(acc.BaseAccount.Subscribing, amount.Bytes())
 			acc.BaseAccount.Subscribed = common.AddBigInt(acc.BaseAccount.Subscribed, amount.Bytes())
 		}
+		return acc, nil
+	})
+}
+
+func OnAccSubscribeSettleInterest(db vm_db.VmDb, address []byte, interest *big.Int) (*defiproto.Account, error) {
+	addr, _ := types.BytesToAddress(address)
+	return updateFund(db, addr, ledger.ViteTokenId.Bytes(), func(acc *defiproto.Account) (*defiproto.Account, error) {
+		acc.BaseAccount.Available = common.AddBigInt(acc.BaseAccount.Available, interest.Bytes())
 		return acc, nil
 	})
 }

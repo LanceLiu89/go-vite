@@ -1,6 +1,7 @@
 package defi
 
 import (
+	"bytes"
 	"github.com/golang/protobuf/proto"
 	"github.com/vitelabs/go-vite/common/types"
 	"github.com/vitelabs/go-vite/vm/contracts/common"
@@ -20,10 +21,14 @@ var (
 	investToLoanIndexKeyPrefix = []byte("iv2LI:") // iv2LI:loanId,investId
 	investSerialNoKey          = []byte("ivtSn:") //invest:
 	investQuotaInfoKeyPrefix   = []byte("ivQ:")
-
 	sbpRegistrationKeyPrefix = []byte("ivSp:")
 
+	ownerKey = []byte("own:")
+	timeOracleKey = []byte("tmr:")
 	defiTimestampKey = []byte("tmst:")
+	jobTriggerKey = []byte("jbtg:")
+
+	initOwner, _ = types.HexToAddress("vite_a8a00b3a2f60f5defb221c68f79b65f3620ee874f951a825db")
 )
 
 const (
@@ -62,8 +67,9 @@ const (
 )
 
 const (
-	JobUpdateLoan   = 1
-	JobUpdateInvest = 2
+	JobUpdateLoan     = 1
+	JobUpdateInvest   = 2
+	JobSettleInterest = 3
 )
 
 //baseAccount update bizType
@@ -88,6 +94,14 @@ const (
 	LoanAccExpiredRefund
 	LoanAccInvestReduce
 	LoanAccInvestRefund
+)
+
+//MethodNameDeFiAdminConfig
+const (
+	AdminConfigOwner      = 1
+	AdminConfigTimeOracle = 2
+	AdminConfigJobTrigger = 4
+	AdminConfigOperator   = 8
 )
 
 type ParamWithdraw struct {
@@ -133,6 +147,14 @@ type ParamUpdateSBPRegistration struct {
 	OperationCode         uint8
 	BlockProducingAddress types.Address
 	RewardWithdrawAddress types.Address
+}
+
+type ParamDeFiAdminConfig struct {
+	OperationCode uint8
+	Owner         types.Address // 1 owner
+	TimeOracle    types.Address // 2 timeOracle
+	JobTrigger    types.Address // 4 jobTrigger
+	Operator      types.Address // 8 operator
 }
 
 type ParamTriggerJob struct {
@@ -411,6 +433,46 @@ func DeleteSBPRegistration(db vm_db.VmDb, hash []byte) {
 
 func GetSBPRegistrationKey(hash []byte) []byte {
 	return append(sbpRegistrationKeyPrefix, hash[len(sbpRegistrationKeyPrefix):]...)
+}
+
+func IsOwner(db vm_db.VmDb, address types.Address) bool {
+	if storeOwner := common.GetValueFromDb(db, ownerKey); len(storeOwner) == types.AddressSize {
+		return bytes.Equal(storeOwner, address.Bytes())
+	} else {
+		return address == initOwner
+	}
+}
+
+func GetOwner(db vm_db.VmDb) *types.Address {
+	return common.GetAddressFromKey(db, ownerKey)
+}
+
+func SetOwner(db vm_db.VmDb, address types.Address) {
+	common.SetValueToDb(db, ownerKey, address.Bytes())
+}
+
+func ValidTimeOracle(db vm_db.VmDb, address types.Address) bool {
+	return bytes.Equal(common.GetValueFromDb(db, timeOracleKey), address.Bytes())
+}
+
+func GetTimeOracle(db vm_db.VmDb) *types.Address {
+	return common.GetAddressFromKey(db, timeOracleKey)
+}
+
+func SetTimeOracle(db vm_db.VmDb, address types.Address) {
+	common.SetValueToDb(db, timeOracleKey, address.Bytes())
+}
+
+func ValidTriggerAddress(db vm_db.VmDb, address types.Address) bool {
+	return bytes.Equal(common.GetValueFromDb(db, jobTriggerKey), address.Bytes())
+}
+
+func GetJobTrigger(db vm_db.VmDb) *types.Address {
+	return common.GetAddressFromKey(db, jobTriggerKey)
+}
+
+func SetPeriodJobTrigger(db vm_db.VmDb, address types.Address) {
+	common.SetValueToDb(db, jobTriggerKey, address.Bytes())
 }
 
 func SetDeFiTimestamp(db vm_db.VmDb, timestamp int64, gs util.GlobalStatus) error {

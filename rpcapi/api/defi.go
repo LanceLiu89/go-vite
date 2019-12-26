@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"github.com/vitelabs/go-vite/chain"
 	"github.com/vitelabs/go-vite/common/types"
 	"github.com/vitelabs/go-vite/log15"
@@ -8,6 +9,7 @@ import (
 	"github.com/vitelabs/go-vite/rpcapi/api/dex"
 	"github.com/vitelabs/go-vite/vite"
 	"github.com/vitelabs/go-vite/vm/contracts/defi"
+	"github.com/vitelabs/go-vite/vm_db"
 )
 
 type DeFiApi struct {
@@ -184,6 +186,41 @@ func (f DeFiApi) GetLoanSubscriptions(loaId uint64) ([]*apidefi.RpcSubscription,
 	}
 }
 
+func (f DeFiApi) GetDeFiConfig() (map[string]string, error) {
+	db, err := getVmDb(f.chain, types.AddressDeFi)
+	if err != nil {
+		return nil, err
+	}
+	configs := make(map[string]string)
+	owner := defi.GetOwner(db)
+	configs["owner"] = owner.String()
+	if timer := defi.GetTimeOracle(db); timer != nil {
+		configs["timer"] = timer.String()
+	}
+	if trigger := defi.GetJobTrigger(db); trigger != nil {
+		configs["trigger"] = trigger.String()
+	}
+	return configs, nil
+}
+
+
+func (f DeFiApi) GetTimestamp() (int64, error) {
+	db, err := getVmDb(f.chain, types.AddressDeFi)
+	if err != nil {
+		return 0, err
+	}
+	return defi.GetDeFiTimestamp(db), nil
+}
+
+func (f DeFiApi) VerifyBalance() (*defi.DeFiVerifyRes, error) {
+	db, err := getVmDb(f.chain, types.AddressDeFi)
+	if err != nil {
+		return nil, err
+	}
+	return defi.VerifyDeFiBalance(db), nil
+}
+
+
 func (f DeFiApi) GetLoanInvests(loaId uint64) ([]*apidefi.RpcInvest, error) {
 	db, err := getVmDb(f.chain, types.AddressDeFi)
 	if err != nil {
@@ -200,10 +237,66 @@ func (f DeFiApi) GetLoanInvests(loaId uint64) ([]*apidefi.RpcInvest, error) {
 	}
 }
 
-func (f DeFiApi) GetTimestamp() (int64, error) {
-	db, err := getVmDb(f.chain, types.AddressDeFi)
+func (f DeFiApi) GetLoanListByPage(loanId uint64, count int) (rpcLoanPage *apidefi.RpcLoanPage, err error) {
+	var (
+		db         vm_db.VmDb
+		loans      []*defi.Loan
+		lastLoanId uint64
+	)
+	db, err = getVmDb(f.chain, types.AddressDeFi)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return defi.GetDeFiTimestamp(db), nil
+	if loans, lastLoanId, err = defi.GetLoanList(db, loanId, count); err == nil && len(loans) > 0 {
+		rpcLoans := make([]*apidefi.RpcLoan, 0, count)
+		for _, loan := range loans {
+			rpcLoans = append(rpcLoans, apidefi.LoanToRpc(loan))
+		}
+		rpcLoanPage = &apidefi.RpcLoanPage{Loans: rpcLoans, LastLoanId: lastLoanId, Count: len(loans)}
+	}
+	return
+}
+
+func (f DeFiApi) GetInvestListByPage(investId uint64, count int) (rpcInvestPage *apidefi.RpcInvestPage, err error) {
+	var (
+		db           vm_db.VmDb
+		invests      []*defi.Invest
+		lastInvestId uint64
+	)
+	db, err = getVmDb(f.chain, types.AddressDeFi)
+	if err != nil {
+		return nil, err
+	}
+	if invests, lastInvestId, err = defi.GetInvestList(db, investId, count); err == nil && len(invests) > 0 {
+		rpcInvests := make([]*apidefi.RpcInvest, 0, len(invests))
+		for _, invest := range invests {
+			rpcInvests = append(rpcInvests, apidefi.InvestToRpc(invest))
+		}
+		rpcInvestPage = &apidefi.RpcInvestPage{Invests: rpcInvests, LastInvestId: lastInvestId, Count: len(invests)}
+	}
+	return
+}
+
+func (f DeFiApi) GetSubscriptionListByPage(keyStr string, count int) (rpcInvestPage *apidefi.RpcSubscriptionPage, err error) {
+	var (
+		db           vm_db.VmDb
+		subs      []*defi.Subscription
+		lastSubKey []byte
+		key []byte
+	)
+	db, err = getVmDb(f.chain, types.AddressDeFi)
+	if err != nil {
+		return nil, err
+	}
+	if key, err = hex.DecodeString(keyStr); err != nil {
+		return
+	}
+	if subs, lastSubKey, err = defi.GetSubscriptionList(db, key, count); err == nil && len(subs) > 0 {
+		rpcSubs := make([]*apidefi.RpcSubscription, 0, len(subs))
+		for _, sub := range subs {
+			rpcSubs = append(rpcSubs, apidefi.SubscriptionToRpc(sub))
+		}
+		rpcInvestPage = &apidefi.RpcSubscriptionPage{Subscriptions: rpcSubs, LastSubKey: hex.EncodeToString(lastSubKey), Count: len(subs)}
+	}
+	return
 }

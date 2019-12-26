@@ -255,6 +255,8 @@ type QuotaTable struct {
 	DeFiUpdateSBPRegistrationQuota       uint64
 	DeFiDefaultQuota                     uint64
 	DeFiTriggerJobQuota                  uint64
+	DeFiAdminConfigQuota                 uint64
+	DeFiNotifyTimeQuota                  uint64
 }
 
 // QuotaTableByHeight returns different quota table by hard fork version

@@ -22,4 +22,5 @@ var (
 
 	InnerError             = errors.New("inner error")
 	ExceedFundAvailableErr = errors.New("exceed fund available")
+	DeFiOwnerNotConfigErr  = errors.New("owner not config")
 )
