@@ -11,7 +11,7 @@ import (
 )
 
 func CheckLoanParam(param *ParamNewLoan) error {
-	if param.Token != ledger.ViteTokenId || param.DayRate <= MinDayRate || param.DayRate >= MaxDayRate ||
+	if param.Token != ledger.ViteTokenId || param.DayRate < MinDayRate || param.DayRate > MaxDayRate ||
 		param.ShareAmount.Cmp(minShareAmount) < 0 || param.Shares <= 0 ||
 		param.SubscribeDays < MinSubDays || param.SubscribeDays > MaxSubDays || param.ExpireDays <= 0 {
 		return InvalidInputParamErr
@@ -38,6 +38,7 @@ func NewLoan(address types.Address, db vm_db.VmDb, param *ParamNewLoan, interest
 
 func OnLoanInvest(db vm_db.VmDb, loan *Loan, amount *big.Int) {
 	loan.Invested = common.AddBigInt(loan.Invested, amount.Bytes())
+	loan.Updated = GetDeFiTimestamp(db)
 	SaveLoan(db, loan)
 }
 
@@ -46,6 +47,7 @@ func OnLoanCancelInvest(db vm_db.VmDb, loan *Loan, amount []byte) {
 		panic(ExceedFundAvailableErr)
 	} else {
 		loan.Invested = common.SubBigIntAbs(loan.Invested, amount)
+		loan.Updated = GetDeFiTimestamp(db)
 		SaveLoan(db, loan)
 	}
 }

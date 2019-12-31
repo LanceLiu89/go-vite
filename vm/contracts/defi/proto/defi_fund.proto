@@ -42,7 +42,7 @@ message Loan {
     uint64 StartHeight = 11;
     uint64 ExpireHeight = 12;
     bytes Invested = 13;
-    // 1 open, 2 success, 3 failed, 4 expired, 5 fail refunded, 6 expire refunded
+    // 1 open, 2 success, 3 cancelled, 4 failed, 5 expired, 6 expire refunded
     int32 Status = 14;
     bytes SettledInterest = 15;
     int32 SettledDays = 16;
@@ -59,7 +59,7 @@ message Subscription {
     bytes ShareAmount = 4;
     int32 Shares = 5;
     bytes Interest = 6;
-    // 1 open, 2 success, 3 failed, 4 expired, 5 fail refunded, 6 expire refunded
+    // 1 open, 2 success, 4 failed, 5 expired, 6 expire refunded
     int32 Status = 7;
     int64 Created = 8;
     int64 Updated = 9;
@@ -77,7 +77,7 @@ message Invest {
     uint64 CreateHeight = 8;
     //only used for can be cancel, not for auto cancel
     uint64 ExpireHeight = 9;
-    // 1 pending, 2 success, 3 failed, 4 expired, 5 fail refunded, 6 expire refunded
+    // 1 pending, 2 success, 3 cancelling, 4 refunded
     int32 Status = 10;
     bytes InvestHash = 11;
     int64 Created = 12;

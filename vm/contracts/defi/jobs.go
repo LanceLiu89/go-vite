@@ -4,6 +4,7 @@ import (
 	"github.com/vitelabs/go-vite/interfaces"
 	"github.com/vitelabs/go-vite/ledger"
 	"github.com/vitelabs/go-vite/vm/contracts/common"
+	"github.com/vitelabs/go-vite/vm/contracts/dex"
 	"github.com/vitelabs/go-vite/vm/util"
 	"github.com/vitelabs/go-vite/vm_db"
 	"math/big"
@@ -36,16 +37,22 @@ func UpdateLoans(db vm_db.VmDb, data []byte, gs util.GlobalStatus, deFiDayHeight
 	return
 }
 
-func UpdateInvests(db vm_db.VmDb, data []byte, confirmSeconds int64) {
+func UpdateInvests(db vm_db.VmDb, data []byte, gs util.GlobalStatus, confirmSeconds int64, deFiDayHeight uint64) (blocks []*ledger.AccountBlock, err error) {
+	var bls []*ledger.AccountBlock
 	if len(data) > 0 {
 		for i := 0; i < len(data)/8; i++ {
 			investId := common.BytesToUint64(data[i*8 : (i+1)*8])
 			if invest, ok := GetInvest(db, investId); ok {
-				innerUpdateInvest(db, invest, GetDeFiTimestamp(db), confirmSeconds)
+				if bls, err = innerUpdateInvest(db, invest, gs, confirmSeconds, deFiDayHeight); err != nil {
+					return
+				} else {
+					blocks = append(blocks, bls...)
+				}
 			}
 		}
 	} else {
-		iterator, err := db.NewStorageIterator(investKeyPrefix)
+		var iterator interfaces.StorageIterator
+		iterator, err = db.NewStorageIterator(investKeyPrefix)
 		if err != nil {
 			panic(err)
 		}
@@ -62,9 +69,14 @@ func UpdateInvests(db vm_db.VmDb, data []byte, confirmSeconds int64) {
 			if err = invest.DeSerialize(investValue); err != nil {
 				panic(err)
 			}
-			innerUpdateInvest(db, invest, GetDeFiTimestamp(db), confirmSeconds)
+			if bls, err = innerUpdateInvest(db, invest, gs, confirmSeconds, deFiDayHeight); err != nil {
+				return
+			} else {
+				blocks = append(blocks, bls...)
+			}
 		}
 	}
+	return
 }
 
 func SettleInterest(db vm_db.VmDb, data []byte, gs util.GlobalStatus, dayHeight uint64) (err error) {
@@ -124,11 +136,20 @@ func innerUpdateLoan(db vm_db.VmDb, loan *Loan, estTime, time int64, gs util.Glo
 	return
 }
 
-func innerUpdateInvest(db vm_db.VmDb, invest *Invest, time int64, confirmSeconds int64) {
-	if invest.Status == InvestPending && invest.BizType != InvestForQuota && time-invest.Created > confirmSeconds {
+func innerUpdateInvest(db vm_db.VmDb, invest *Invest, gs util.GlobalStatus, confirmSeconds int64, deFiDayHeight uint64) ([]*ledger.AccountBlock, error){
+	if invest.Status == InvestPending && invest.BizType != InvestForQuota && GetDeFiTimestamp(db)-invest.Created > confirmSeconds {
 		//InvestForMining, InvestForSVIP, InvestForSBP
 		ConfirmInvest(db, invest)
+	} else if invest.Status == InvestSuccess && invest.BizType == InvestForMining {
+		if invest.ExpireHeight <= gs.SnapshotBlock().Height {//can be cancelled
+			loan, _ := GetLoan(db, invest.LoanId)
+			if (loan.ExpireHeight - gs.SnapshotBlock().Height)/deFiDayHeight <= uint64(dex.SchedulePeriods) {
+				CancellingInvest(db, invest)
+				return DoCancelDexInvest(common.Uint64ToBytes(invest.Id))
+			}
+		}
 	}
+	return nil, nil
 }
 
 func innerSettleLoanInterest(db vm_db.VmDb, loan *Loan, gs util.GlobalStatus, deFiDayHeight uint64) (err error) {
@@ -171,6 +192,7 @@ func innerSettleLoanInterest(db vm_db.VmDb, loan *Loan, gs util.GlobalStatus, de
 			}
 			AddBaseAccountEvent(db, loan.Address, BaseLoanInterestReduce, 0, loan.Id, loanNewInterest.Bytes())
 		}
+		loan.Updated = GetDeFiTimestamp(db)
 		SaveLoan(db, loan)
 		AddLoanUpdateEvent(db, loan)
 	}

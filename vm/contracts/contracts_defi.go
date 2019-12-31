@@ -771,9 +771,9 @@ func (md MethodDeFiTriggerJob) DoReceive(db vm_db.VmDb, block *ledger.AccountBlo
 	case defi.JobUpdateLoan:
 		blocks, err = defi.UpdateLoans(db, param.Data, vm.GlobalStatus(), nodeConfig.params.DeFiDayHeight)
 	case defi.JobUpdateInvest:
-		defi.UpdateInvests(db, param.Data, nodeConfig.params.DeFiInvestConfirmSeconds)
+		blocks, err = defi.UpdateInvests(db, param.Data, vm.GlobalStatus(), nodeConfig.params.DeFiInvestConfirmSeconds, nodeConfig.params.DeFiDayHeight)
 	case defi.JobSettleInterest:
-		defi.SettleInterest(db, param.Data, vm.GlobalStatus(), nodeConfig.params.DeFiDayHeight)
+		err = defi.SettleInterest(db, param.Data, vm.GlobalStatus(), nodeConfig.params.DeFiDayHeight)
 	}
 	if err != nil {
 		return handleDeFiReceiveErr(md.MethodName, err, sendBlock)
