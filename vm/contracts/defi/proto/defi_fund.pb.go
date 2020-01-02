@@ -256,7 +256,7 @@ type Loan struct {
 	StartHeight      uint64 `protobuf:"varint,11,opt,name=StartHeight,proto3" json:"StartHeight,omitempty"`
 	ExpireHeight     uint64 `protobuf:"varint,12,opt,name=ExpireHeight,proto3" json:"ExpireHeight,omitempty"`
 	Invested         []byte `protobuf:"bytes,13,opt,name=Invested,proto3" json:"Invested,omitempty"`
-	// 1 open, 2 success, 3 failed, 4 expired, 5 fail refunded, 6 expire refunded
+	// 1 open, 2 success, 3 cancelled, 4 failed, 5 expired, 6 expire refunded
 	Status               int32    `protobuf:"varint,14,opt,name=Status,proto3" json:"Status,omitempty"`
 	SettledInterest      []byte   `protobuf:"bytes,15,opt,name=SettledInterest,proto3" json:"SettledInterest,omitempty"`
 	SettledDays          int32    `protobuf:"varint,16,opt,name=SettledDays,proto3" json:"SettledDays,omitempty"`
@@ -434,7 +434,7 @@ type Subscription struct {
 	ShareAmount []byte `protobuf:"bytes,4,opt,name=ShareAmount,proto3" json:"ShareAmount,omitempty"`
 	Shares      int32  `protobuf:"varint,5,opt,name=Shares,proto3" json:"Shares,omitempty"`
 	Interest    []byte `protobuf:"bytes,6,opt,name=Interest,proto3" json:"Interest,omitempty"`
-	// 1 open, 2 success, 3 failed, 4 expired, 5 fail refunded, 6 expire refunded
+	// 1 open, 2 success, 4 failed, 5 expired, 6 expire refunded
 	Status               int32    `protobuf:"varint,7,opt,name=Status,proto3" json:"Status,omitempty"`
 	Created              int64    `protobuf:"varint,8,opt,name=Created,proto3" json:"Created,omitempty"`
 	Updated              int64    `protobuf:"varint,9,opt,name=Updated,proto3" json:"Updated,omitempty"`
@@ -543,7 +543,7 @@ type Invest struct {
 	CreateHeight uint64 `protobuf:"varint,8,opt,name=CreateHeight,proto3" json:"CreateHeight,omitempty"`
 	//only used for can be cancel, not for auto cancel
 	ExpireHeight uint64 `protobuf:"varint,9,opt,name=ExpireHeight,proto3" json:"ExpireHeight,omitempty"`
-	// 1 pending, 2 success, 3 failed, 4 expired, 5 fail refunded, 6 expire refunded
+	// 1 pending, 2 success, 3 cancelling, 4 refunded
 	Status               int32    `protobuf:"varint,10,opt,name=Status,proto3" json:"Status,omitempty"`
 	InvestHash           []byte   `protobuf:"bytes,11,opt,name=InvestHash,proto3" json:"InvestHash,omitempty"`
 	Created              int64    `protobuf:"varint,12,opt,name=Created,proto3" json:"Created,omitempty"`

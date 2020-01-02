@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/vitelabs/go-vite/common/db/xleveldb/errors"
 	"github.com/vitelabs/go-vite/verifier"
+	"github.com/vitelabs/go-vite/vm/contracts/defi"
 	"github.com/vitelabs/go-vite/vm/contracts/dex"
 	"github.com/vitelabs/go-vite/vm/util"
 	"github.com/vitelabs/go-vite/wallet/walleterrors"
@@ -196,6 +197,11 @@ var (
 		Code:    -37013,
 	}
 
+	ErrDeFiLoanNotExists = JsonRpc2Error{
+		Message: defi.LoanNotExistsErr.Error(),
+		Code:    -38001,
+	}
+
 	concernedErrorMap map[string]JsonRpc2Error
 )
 
@@ -244,6 +250,8 @@ func init() {
 	concernedErrorMap[ErrDexTradeMarketInvalidQuoteToken.Error()] = ErrDexTradeMarketInvalidQuoteToken
 	concernedErrorMap[ErrDexTradeMarketInvalidTokenPair.Error()] = ErrDexTradeMarketInvalidTokenPair
 	concernedErrorMap[ErrDexFundUserNotExists.Error()] = ErrDexFundUserNotExists
+
+	concernedErrorMap[ErrDeFiLoanNotExists.Error()] = ErrDeFiLoanNotExists
 
 }
 
