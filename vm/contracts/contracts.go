@@ -101,7 +101,7 @@ func newDexContracts() map[types.Address]*builtinContract {
 	contracts[types.AddressDexFund] = &builtinContract{
 		map[string]BuiltinContractMethod{
 			cabi.MethodNameDexFundUserDeposit:          &MethodDexFundDeposit{cabi.MethodNameDexFundUserDeposit},
-			cabi.MethodNameDexFundUserWithdraw:         &MethodDeFiWithdraw{cabi.MethodNameDexFundUserWithdraw},
+			cabi.MethodNameDexFundUserWithdraw:         &MethodDexFundWithdraw{cabi.MethodNameDexFundUserWithdraw},
 			cabi.MethodNameDexFundNewMarket:            &MethodDexFundOpenNewMarket{cabi.MethodNameDexFundNewMarket},
 			cabi.MethodNameDexFundNewOrder:             &MethodDexFundPlaceOrder{cabi.MethodNameDexFundNewOrder},
 			cabi.MethodNameDexFundSettleOrders:         &MethodDexFundSettleOrders{cabi.MethodNameDexFundSettleOrders},
@@ -162,7 +162,7 @@ func newLeafContracts() map[types.Address]*builtinContract {
 	contracts[types.AddressAsset].m[cabi.MethodNameTransferOwnershipV2] = &MethodTransferOwnership{cabi.MethodNameTransferOwnershipV2}
 
 	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundDeposit] = &MethodDexFundDeposit{cabi.MethodNameDexFundDeposit}
-	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundWithdraw] = &MethodDeFiWithdraw{cabi.MethodNameDexFundWithdraw}
+	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundWithdraw] = &MethodDexFundWithdraw{cabi.MethodNameDexFundWithdraw}
 	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundOpenNewMarket] = &MethodDexFundOpenNewMarket{cabi.MethodNameDexFundOpenNewMarket}
 	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundPlaceOrder] = &MethodDexFundPlaceOrder{cabi.MethodNameDexFundPlaceOrder}
 	contracts[types.AddressDexFund].m[cabi.MethodNameDexFundSettleOrdersV2] = &MethodDexFundSettleOrders{cabi.MethodNameDexFundSettleOrdersV2}
